@@ -1,0 +1,22 @@
+{
+  "name": "opencode-marketplace",
+  "owner": { "name": "Allan Santos" },
+  "metadata": {
+    "description": "Marketplace de plugins do OpenCode - vitrine pública de plugins para o agente de código",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "memory",
+      "description": "Memória persistente entre sessões para o OpenCode - recall semântico, grafo de código, dashboard visual e curadoria automática",
+      "version": "0.1.0",
+      "source": "./plugins/memory",
+      "author": { "name": "Allan Santos" },
+      "homepage": "https://github.com/AllanSantos-DV/opencode-memory",
+      "repository": "https://github.com/AllanSantos-DV/opencode-memory",
+      "license": "MIT",
+      "keywords": ["memory", "recall", "graph", "dashboard", "curation"],
+      "category": "productivity"
+    }
+  ]
+}
