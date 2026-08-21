@@ -1,6 +1,6 @@
 {
   "name": "memory",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Memória persistente entre sessões para o OpenCode - recall semântico, grafo de código, dashboard visual e curadoria automática",
   "author": {
     "name": "Allan Santos",
