@@ -568,7 +568,7 @@ function explainError(e) {
 init_contracts();
 import { execFileSync } from "node:child_process";
 import { existsSync as existsSync2, readFileSync as readFileSync2 } from "node:fs";
-import { join as join2 } from "node:path";
+import { join as join2, isAbsolute } from "node:path";
 function normalizeGitRemote(remoteUrl) {
   if (!remoteUrl) return null;
   let url = remoteUrl.trim();
@@ -622,7 +622,7 @@ function assertSafeProjectId(projectId) {
   if (!projectId || projectId.length === 0) {
     throw new Error("Project ID must not be empty");
   }
-  if (projectId.includes("\\") || projectId.includes("/")) {
+  if (projectId.includes("\\") || isAbsolute(projectId) || projectId.startsWith("/") || /^[a-zA-Z]:[\\/]/.test(projectId)) {
     throw new Error(`Project ID must not be a path: ${projectId}`);
   }
   return projectId;
