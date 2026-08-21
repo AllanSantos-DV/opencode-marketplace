@@ -18,6 +18,19 @@ function truncate(s, n) {
   if (s.length <= n) return s;
   return s.slice(0, n - 3) + "...";
 }
+function sleep(ms, signal) {
+  return new Promise((resolve) => {
+    if (signal?.aborted) {
+      resolve();
+      return;
+    }
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener("abort", () => {
+      clearTimeout(timer);
+      resolve();
+    }, { once: true });
+  });
+}
 function safeJsonParse(text, fallback) {
   try {
     return JSON.parse(text);
@@ -360,6 +373,197 @@ var MemoryClient = class {
 // src/recall.ts
 init_contracts();
 
+// src/graph.ts
+init_contracts();
+var GraphClient = class {
+  #baseUrl;
+  #timeoutMs;
+  constructor(opts) {
+    this.#baseUrl = opts.baseUrl.replace(/\/+$/, "");
+    this.#timeoutMs = opts.timeoutMs ?? 15e3;
+  }
+  async #req(method, path, body) {
+    const url = `${this.#baseUrl}${path}`;
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), this.#timeoutMs);
+    try {
+      const headers = { "Content-Type": "application/json" };
+      const init = { method, headers, signal: ac.signal };
+      if (body !== void 0) init.body = JSON.stringify(body);
+      const res = await fetch(url, init);
+      if (!res.ok) {
+        let text = "";
+        try {
+          text = await res.text();
+        } catch {
+        }
+        let parsed = null;
+        try {
+          parsed = JSON.parse(text);
+        } catch {
+        }
+        throw new GraphError(`HTTP ${res.status}`, {
+          status: res.status,
+          code: typeof parsed?.code === "string" ? parsed.code : null,
+          hint: typeof parsed?.hint === "string" ? parsed.hint : void 0,
+          state: typeof parsed?.state === "string" ? parsed.state : void 0,
+          retryAfter: res.headers.get("Retry-After") ?? void 0,
+          mappedRoot: typeof parsed?.mappedRoot === "string" ? parsed.mappedRoot : void 0,
+          requestedRoot: typeof parsed?.requestedRoot === "string" ? parsed.requestedRoot : void 0
+        });
+      }
+      if (res.status === 204) return void 0;
+      return await res.json();
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  async #reqGraph(path, params) {
+    const qs = params ? "?" + new URLSearchParams(params).toString() : "";
+    return this.#req("GET", `/api/v1/graph${path}${qs}`);
+  }
+  async #postGraph(path, body) {
+    return this.#req("POST", `/api/v1/graph${path}`, body);
+  }
+  async status(root, expectedProjectId) {
+    const params = { root };
+    if (expectedProjectId) params.project_id = expectedProjectId;
+    return await this.#reqGraph("/status", params);
+  }
+  async ingest(root, opts) {
+    const body = { root, refresh: opts?.refresh ?? false };
+    if (opts?.expectedProjectId) body.project_id = opts.expectedProjectId;
+    return await this.#postGraph("/ingest", body);
+  }
+  async symbols(root, opts) {
+    const params = { root };
+    if (opts?.query) params.q = opts.query;
+    if (opts?.limit !== void 0) params.limit = String(opts.limit);
+    if (opts?.expectedProjectId) params.project_id = opts.expectedProjectId;
+    return await this.#reqGraph("/symbols", params);
+  }
+  async search(root, opts) {
+    const params = { root, query: opts.query };
+    if (opts.topK !== void 0) params.topK = String(opts.topK);
+    if (opts.hops !== void 0) params.hops = String(opts.hops);
+    if (opts.expectedProjectId) params.project_id = opts.expectedProjectId;
+    return await this.#reqGraph("/search", params);
+  }
+  async callers(root, opts) {
+    if (!opts.id) throw new Error("id is required");
+    const params = { root, id: opts.id };
+    if (opts.limit !== void 0) params.limit = String(opts.limit);
+    if (opts.expectedProjectId) params.project_id = opts.expectedProjectId;
+    return await this.#reqGraph("/callers", params);
+  }
+  async references(root, opts) {
+    if (!opts.id) throw new Error("id is required");
+    const params = { root, id: opts.id };
+    if (opts.limit !== void 0) params.limit = String(opts.limit);
+    if (opts.expectedProjectId) params.project_id = opts.expectedProjectId;
+    return await this.#reqGraph("/references", params);
+  }
+  async tags(root, opts) {
+    const body = { root, id: opts.id, terms: opts.terms };
+    if (opts.source) body.source = opts.source;
+    if (opts.expectedProjectId) body.project_id = opts.expectedProjectId;
+    return await this.#postGraph("/tags", body);
+  }
+  async ensureReady(root, opts) {
+    const deadline = opts?.deadlineMs ?? 18e4;
+    const start = Date.now();
+    let backoff = 2e3;
+    const pollOnce = async () => {
+      const st2 = await this.status(root, opts?.expectedProjectId);
+      opts?.onProgress?.(st2.state, st2.nodes);
+      return st2;
+    };
+    let st = await this.status(root, opts?.expectedProjectId);
+    opts?.onProgress?.(st.state, st.nodes);
+    if (st.state === "ready" && !opts?.refresh) {
+      return st;
+    }
+    if (st.state === "not_indexed" || st.state === "failed" || opts?.refresh) {
+      try {
+        st = await this.ingest(root, {
+          refresh: opts?.refresh,
+          expectedProjectId: opts?.expectedProjectId
+        });
+        opts?.onProgress?.(st.state, st.nodes);
+      } catch (e) {
+        if (e instanceof GraphError && e.status === 429) {
+          return { ...st, queued: true, retryAfter: e.retryAfter };
+        }
+        throw e;
+      }
+    }
+    let retries = 1;
+    while (Date.now() - start < deadline) {
+      await sleep(Math.min(backoff, 15e3));
+      backoff = Math.min(backoff * 2, 15e3);
+      try {
+        st = await this.status(root, opts?.expectedProjectId);
+        opts?.onProgress?.(st.state, st.nodes);
+        if (st.state === "ready") {
+          return st;
+        }
+        if (st.state === "failed" && retries > 0) {
+          retries--;
+          try {
+            await this.ingest(root, { expectedProjectId: opts?.expectedProjectId });
+          } catch {
+          }
+        }
+      } catch (e) {
+        if (e instanceof GraphError && e.status === 429) {
+          return { ...st, queued: true, retryAfter: e.retryAfter };
+        }
+      }
+    }
+    return { ...st, timedOut: true };
+  }
+};
+async function readGuard(client, root, cwd, fn) {
+  const effectiveRoot = root || cwd;
+  if (!effectiveRoot) {
+    return "No root directory available. Set root or run in a project directory.";
+  }
+  try {
+    const st = await client.status(effectiveRoot);
+    if (st.state !== "ready") {
+      return `Graph is not ready (state: ${st.state}). Run graph_analyze first.`;
+    }
+    if (st.nodes === 0) {
+      return `Graph has 0 nodes. Run graph_analyze to index the project first.`;
+    }
+  } catch (e) {
+    return `Graph status check failed: ${explainError(e)}`;
+  }
+  try {
+    return await fn(client, effectiveRoot);
+  } catch (e) {
+    return `Graph operation failed: ${explainError(e)}`;
+  }
+}
+function fmtNode(n) {
+  const sig = n.signature ? ` ${n.signature}` : "";
+  const pr = typeof n.pagerank === "number" ? n.pagerank.toFixed(3) : "N/A";
+  const base = `[${n.type}] ${n.name} (${n.file}:${n.startLine}-${n.endLine}, pagerank=${pr})${sig}`;
+  const doc = typeof n.doc === "string" ? n.doc.trim().replace(/\s+/g, " ") : "";
+  return doc ? `${base} | doc: ${truncate(doc, 200)}` : base;
+}
+function explainError(e) {
+  if (e instanceof GraphError) {
+    const parts = [e.message];
+    if (e.hint) parts.push(`Hint: ${e.hint}`);
+    if (e.mappedRoot) parts.push(`Mapped root: ${e.mappedRoot}`);
+    if (e.state) parts.push(`State: ${e.state}`);
+    return parts.join(" | ");
+  }
+  if (e instanceof Error) return e.message;
+  return String(e);
+}
+
 // src/projectId.ts
 init_contracts();
 import { execFileSync } from "node:child_process";
@@ -557,6 +761,40 @@ async function fallbackSearch(client, projectId, query, opts) {
     return { text: "", count: 0, source: "empty" };
   }
 }
+var graphStatusCache = /* @__PURE__ */ new Map();
+function isGraphReadyCached(root) {
+  const cached = graphStatusCache.get(root);
+  if (cached && Date.now() - cached.at < 3e4) return cached.state === "ready";
+  return null;
+}
+function setGraphCache(root, state) {
+  graphStatusCache.set(root, { state, at: Date.now() });
+  if (graphStatusCache.size > 100) {
+    const first = graphStatusCache.keys().next().value;
+    if (first) graphStatusCache.delete(first);
+  }
+}
+async function graphFallback(graphClient, root, query, signal) {
+  try {
+    const cachedReady = isGraphReadyCached(root);
+    if (cachedReady === false) return { text: "", count: 0, source: "empty" };
+    if (cachedReady === null) {
+      const st = await graphClient.status(root);
+      if (signal.aborted) return { text: "", count: 0, source: "empty" };
+      setGraphCache(root, st.state);
+      if (st.state !== "ready" || st.nodes === 0) return { text: "", count: 0, source: "empty" };
+    }
+    const res = await graphClient.search(root, { query, topK: 5, hops: 1 });
+    if (signal.aborted) return { text: "", count: 0, source: "empty" };
+    if (!res.seed.length && !res.expanded.length) return { text: "", count: 0, source: "empty" };
+    const nodes = [...res.seed, ...res.expanded].slice(0, 8);
+    const lines = nodes.map((n) => `- ${fmtNode(n)}`);
+    return { text: `### Graph Context (${nodes.length} nodes)
+${lines.join("\n")}`, count: nodes.length, source: "graph" };
+  } catch {
+    return { text: "", count: 0, source: "empty" };
+  }
+}
 async function composeRecall(client, workingDirectory, query, opts) {
   if (opts?.recall === false) return { text: "", count: 0, source: "empty" };
   const defaults = recallOptsFromEnv();
@@ -566,6 +804,7 @@ async function composeRecall(client, workingDirectory, query, opts) {
     ...opts?.minScore !== void 0 && { minScore: opts.minScore },
     ...opts?.overallDeadlineMs !== void 0 && { overallDeadlineMs: opts.overallDeadlineMs }
   };
+  const startMs = Date.now();
   const overallAc = new AbortController();
   const overallTimer = setTimeout(() => overallAc.abort(), effectiveOpts.overallDeadlineMs);
   const overallSignal = overallAc.signal;
@@ -593,8 +832,14 @@ async function composeRecall(client, workingDirectory, query, opts) {
     if (!projectId || overallSignal.aborted) return { text: "", count: 0, source: "empty" };
     const ctx = await fallbackContext(client, projectId, query, { ...effectiveOpts, signal: overallSignal });
     if (ctx.source !== "empty") return ctx;
+    let searchResult = null;
     if (!overallSignal.aborted) {
-      return await fallbackSearch(client, projectId, query, { ...effectiveOpts, signal: overallSignal });
+      searchResult = await fallbackSearch(client, projectId, query, { ...effectiveOpts, signal: overallSignal });
+      if (searchResult.source !== "empty") return searchResult;
+    }
+    const remaining = effectiveOpts.overallDeadlineMs - (Date.now() - startMs);
+    if (opts?.graphClient && opts?.graphRoot && remaining >= 800 && !overallSignal.aborted) {
+      return await graphFallback(opts.graphClient, opts.graphRoot, query, overallSignal);
     }
     return { text: "", count: 0, source: "empty" };
   } finally {
@@ -862,7 +1107,7 @@ function extractModel(messages) {
 }
 async function runCuration(input) {
   try {
-    const messages = await input.client.session.messages({ id: input.sessionID });
+    const messages = await input.client.session.messages({ path: { id: input.sessionID } });
     const turns = cleanTranscript(messages);
     if (turns.length === 0) {
       return { status: "empty" };
@@ -872,8 +1117,7 @@ async function runCuration(input) {
     for (const block of blocks) {
       try {
         const curationSession = await input.client.session.create({
-          parentID: input.sessionID,
-          title: "memory-curation"
+          body: { parentID: input.sessionID, title: "memory-curation" }
         });
         input.reviewSessions.add(curationSession.id);
         await input.client.session.prompt({
@@ -891,197 +1135,6 @@ async function runCuration(input) {
   } catch {
     return { status: "error" };
   }
-}
-
-// src/graph.ts
-var GraphClient = class {
-  #baseUrl;
-  #timeoutMs;
-  constructor(opts) {
-    this.#baseUrl = opts.baseUrl.replace(/\/+$/, "");
-    this.#timeoutMs = opts.timeoutMs ?? 15e3;
-  }
-  async #req(method, path, body) {
-    const url = `${this.#baseUrl}${path}`;
-    const ac = new AbortController();
-    const timer = setTimeout(() => ac.abort(), this.#timeoutMs);
-    try {
-      const headers = { "Content-Type": "application/json" };
-      const init = { method, headers, signal: ac.signal };
-      if (body !== void 0) init.body = JSON.stringify(body);
-      const res = await fetch(url, init);
-      if (!res.ok) {
-        let text = "";
-        try {
-          text = await res.text();
-        } catch {
-        }
-        let parsed = null;
-        try {
-          parsed = JSON.parse(text);
-        } catch {
-        }
-        throw new GraphError(`HTTP ${res.status}`, {
-          status: res.status,
-          code: typeof parsed?.code === "string" ? parsed.code : null,
-          hint: typeof parsed?.hint === "string" ? parsed.hint : void 0,
-          state: typeof parsed?.state === "string" ? parsed.state : void 0,
-          retryAfter: res.headers.get("Retry-After") ?? void 0,
-          mappedRoot: typeof parsed?.mappedRoot === "string" ? parsed.mappedRoot : void 0,
-          requestedRoot: typeof parsed?.requestedRoot === "string" ? parsed.requestedRoot : void 0
-        });
-      }
-      if (res.status === 204) return void 0;
-      return await res.json();
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-  async #reqGraph(path, params) {
-    const qs = params ? "?" + new URLSearchParams(params).toString() : "";
-    return this.#req("GET", `/api/v1/graph${path}${qs}`);
-  }
-  async #postGraph(path, body) {
-    return this.#req("POST", `/api/v1/graph${path}`, body);
-  }
-  async status(root, expectedProjectId) {
-    const params = { root };
-    if (expectedProjectId) params.project_id = expectedProjectId;
-    return await this.#reqGraph("/status", params);
-  }
-  async ingest(root, opts) {
-    const body = { root, refresh: opts?.refresh ?? false };
-    if (opts?.expectedProjectId) body.project_id = opts.expectedProjectId;
-    return await this.#postGraph("/ingest", body);
-  }
-  async symbols(root, opts) {
-    const params = { root };
-    if (opts?.query) params.q = opts.query;
-    if (opts?.limit !== void 0) params.limit = String(opts.limit);
-    if (opts?.expectedProjectId) params.project_id = opts.expectedProjectId;
-    return await this.#reqGraph("/symbols", params);
-  }
-  async search(root, opts) {
-    const params = { root, query: opts.query };
-    if (opts.topK !== void 0) params.topK = String(opts.topK);
-    if (opts.hops !== void 0) params.hops = String(opts.hops);
-    if (opts.expectedProjectId) params.project_id = opts.expectedProjectId;
-    return await this.#reqGraph("/search", params);
-  }
-  async callers(root, opts) {
-    if (!opts.id) throw new Error("id is required");
-    const params = { root, id: opts.id };
-    if (opts.limit !== void 0) params.limit = String(opts.limit);
-    if (opts.expectedProjectId) params.project_id = opts.expectedProjectId;
-    return await this.#reqGraph("/callers", params);
-  }
-  async references(root, opts) {
-    if (!opts.id) throw new Error("id is required");
-    const params = { root, id: opts.id };
-    if (opts.limit !== void 0) params.limit = String(opts.limit);
-    if (opts.expectedProjectId) params.project_id = opts.expectedProjectId;
-    return await this.#reqGraph("/references", params);
-  }
-  async tags(root, opts) {
-    const body = { root, id: opts.id, terms: opts.terms };
-    if (opts.source) body.source = opts.source;
-    if (opts.expectedProjectId) body.project_id = opts.expectedProjectId;
-    return await this.#postGraph("/tags", body);
-  }
-  async ensureReady(root, opts) {
-    const deadline = opts?.deadlineMs ?? 18e4;
-    const start = Date.now();
-    let backoff = 2e3;
-    const pollOnce = async () => {
-      const st2 = await this.status(root, opts?.expectedProjectId);
-      opts?.onProgress?.(st2.state, st2.nodes);
-      return st2;
-    };
-    let st = await this.status(root, opts?.expectedProjectId);
-    opts?.onProgress?.(st.state, st.nodes);
-    if (st.state === "ready" && !opts?.refresh) {
-      return st;
-    }
-    if (st.state === "not_indexed" || st.state === "failed" || opts?.refresh) {
-      try {
-        st = await this.ingest(root, {
-          refresh: opts?.refresh,
-          expectedProjectId: opts?.expectedProjectId
-        });
-        opts?.onProgress?.(st.state, st.nodes);
-      } catch (e) {
-        if (e instanceof GraphError && e.status === 429) {
-          return { ...st, queued: true, retryAfter: e.retryAfter };
-        }
-        throw e;
-      }
-    }
-    let retries = 1;
-    while (Date.now() - start < deadline) {
-      await sleep(Math.min(backoff, 15e3));
-      backoff = Math.min(backoff * 2, 15e3);
-      try {
-        st = await this.status(root, opts?.expectedProjectId);
-        opts?.onProgress?.(st.state, st.nodes);
-        if (st.state === "ready") {
-          return st;
-        }
-        if (st.state === "failed" && retries > 0) {
-          retries--;
-          try {
-            await this.ingest(root, { expectedProjectId: opts?.expectedProjectId });
-          } catch {
-          }
-        }
-      } catch (e) {
-        if (e instanceof GraphError && e.status === 429) {
-          return { ...st, queued: true, retryAfter: e.retryAfter };
-        }
-      }
-    }
-    return { ...st, timedOut: true };
-  }
-};
-async function readGuard(client, root, cwd, fn) {
-  const effectiveRoot = root || cwd;
-  if (!effectiveRoot) {
-    return "No root directory available. Set root or run in a project directory.";
-  }
-  try {
-    const st = await client.status(effectiveRoot);
-    if (st.state !== "ready") {
-      return `Graph is not ready (state: ${st.state}). Run graph_analyze first.`;
-    }
-    if (st.nodes === 0) {
-      return `Graph has 0 nodes. Run graph_analyze to index the project first.`;
-    }
-  } catch (e) {
-    return `Graph status check failed: ${explainError(e)}`;
-  }
-  try {
-    return await fn(client, effectiveRoot);
-  } catch (e) {
-    return `Graph operation failed: ${explainError(e)}`;
-  }
-}
-function fmtNode(n) {
-  const sig = n.signature ? ` ${n.signature}` : "";
-  const pr = typeof n.pagerank === "number" ? n.pagerank.toFixed(3) : "N/A";
-  return `[${n.type}] ${n.name} (${n.file}:${n.startLine}-${n.endLine}, pagerank=${pr})${sig}`;
-}
-function explainError(e) {
-  if (e instanceof GraphError) {
-    const parts = [e.message];
-    if (e.hint) parts.push(`Hint: ${e.hint}`);
-    if (e.mappedRoot) parts.push(`Mapped root: ${e.mappedRoot}`);
-    if (e.state) parts.push(`State: ${e.state}`);
-    return parts.join(" | ");
-  }
-  if (e instanceof Error) return e.message;
-  return String(e);
-}
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 // src/termExtract.ts
@@ -2174,6 +2227,27 @@ A concrete example showing correct usage.
 Use \`memory_save_skill\` to persist skills and \`memory_list_skills\` to query them.
 `;
 
+// src/ingestionGuide.ts
+var INGESTION_GUIDE = `# Ingestion Guide
+
+## Server-side Ingestion
+
+When \`features.ingestion === false\`, the server does not ingest documents automatically.
+
+## Client-side Ingestion
+
+Set \`OPENCODE_MEMORY_INGEST=1\` to enable client-side ingestion.
+
+## Ingestion Frequency
+
+Set \`OPENCODE_MEMORY_INGEST_EVERY=N\` to ingest every N turns (default: 5, minimum: 1).
+
+## Capability Note
+
+When server-side ingestion is off but client-side ingestion is on, the capability note is:
+"Server-side ingestion is disabled; client-side ingestion is active."
+`;
+
 // src/index.ts
 import { z } from "zod";
 var recallCache = /* @__PURE__ */ new Map();
@@ -2229,6 +2303,27 @@ async function getDaemonInfo() {
   daemonCacheAt = now;
   return null;
 }
+async function handleGraphIngest(root, refresh, workdir, projectId) {
+  try {
+    const daemon = await getDaemonInfo();
+    if (!daemon) return JSON.stringify({ ok: false, error: "Daemon not available" });
+    const gc = getGraphClient(daemon.url);
+    const effectiveRoot = root ?? workdir;
+    const result = await gc.ingest(effectiveRoot, {
+      refresh,
+      expectedProjectId: projectId ?? void 0
+    });
+    return JSON.stringify({
+      ok: true,
+      project_id: result.project_id,
+      root: result.root,
+      state: result.state,
+      status: result.status
+    });
+  } catch (e) {
+    return JSON.stringify({ ok: false, error: explainError(e) });
+  }
+}
 var OpenCodeMemory = async (ctx, options) => {
   const opts = options ?? {};
   const workdir = ctx.worktree ?? ctx.directory ?? process.cwd();
@@ -2267,11 +2362,18 @@ var OpenCodeMemory = async (ctx, options) => {
           const text = _output.parts.filter((p) => p.type === "text").map((p) => p.text).join(" ");
           if (text) {
             const client = getClient(daemon.url);
+            let graphClient;
+            try {
+              graphClient = getGraphClient(daemon.url);
+            } catch {
+            }
             const result = await composeRecall(client, workdir, text, {
               recall: opts.recall,
               maxItems: opts.maxItems,
               minScore: opts.minScore,
-              overallDeadlineMs: opts.overallDeadlineMs
+              overallDeadlineMs: opts.overallDeadlineMs,
+              graphClient,
+              graphRoot: workdir
             });
             recallCache.set(sessionId, result);
             evictIfNeeded(recallCache, MAX_SESSION_CACHE);
@@ -2308,24 +2410,27 @@ var OpenCodeMemory = async (ctx, options) => {
           const daemon = await getDaemonInfo();
           if (!daemon) return;
           curationInFlight = true;
-          void runCuration({
-            client: {
-              session: {
-                // TODO: wire real SDK client — these stubs return empty results
-                messages: async (opts2) => {
-                  void opts2;
-                  return [];
-                },
-                create: async (opts2) => {
-                  void opts2;
-                  return { id: `curation-${Date.now()}` };
-                },
-                prompt: async (opts2) => {
-                  void opts2;
-                  return {};
-                }
+          const sdkSession = ctx?.client?.session;
+          const hasRealSession = sdkSession !== null && typeof sdkSession === "object" && typeof sdkSession.messages === "function" && typeof sdkSession.create === "function" && typeof sdkSession.prompt === "function";
+          const curationClient = hasRealSession ? { session: sdkSession } : {
+            session: {
+              messages: async (opts2) => {
+                void opts2;
+                return [];
+              },
+              create: async (opts2) => {
+                void opts2;
+                return { id: `curation-${Date.now()}` };
+              },
+              prompt: async (opts2) => {
+                void opts2;
+                return {};
               }
-            },
+            }
+          };
+          if (reviewSessions.size >= MAX_SESSION_CACHE) evictIfNeeded(reviewSessions, MAX_SESSION_CACHE);
+          void runCuration({
+            client: curationClient,
             sessionID: sessionId,
             reviewSessions,
             extractModel,
@@ -2513,27 +2618,15 @@ var OpenCodeMemory = async (ctx, options) => {
           root: z.string().optional().describe("Project root directory"),
           refresh: z.boolean().optional().describe("Force re-index from scratch")
         },
-        execute: async (args) => {
-          try {
-            const daemon = await getDaemonInfo();
-            if (!daemon) return JSON.stringify({ ok: false, error: "Daemon not available" });
-            const gc = getGraphClient(daemon.url);
-            const root = args.root ?? workdir;
-            const result = await gc.ingest(root, {
-              refresh: args.refresh,
-              expectedProjectId: projectId ?? void 0
-            });
-            return JSON.stringify({
-              ok: true,
-              project_id: result.project_id,
-              root: result.root,
-              state: result.state,
-              status: result.status
-            });
-          } catch (e) {
-            return JSON.stringify({ ok: false, error: explainError(e) });
-          }
-        }
+        execute: async (args) => handleGraphIngest(args.root, args.refresh, workdir, projectId)
+      }),
+      graph_reindex: tool({
+        description: "Alias to graph_ingest (compat with TOOLS.md) \u2014 re-index the project graph.",
+        args: {
+          root: z.string().optional().describe("Project root directory"),
+          refresh: z.boolean().optional().describe("Force re-index from scratch")
+        },
+        execute: async (args) => handleGraphIngest(args.root, args.refresh, workdir, projectId)
       }),
       graph_symbols: tool({
         description: "List graph symbols (hubs by PageRank, or search by name query).",
@@ -2852,6 +2945,13 @@ var OpenCodeMemory = async (ctx, options) => {
         args: {},
         execute: async () => {
           return JSON.stringify({ title: "memory-skill-guide", output: SKILL_GUIDE });
+        }
+      }),
+      memory_ingestion_guide: tool({
+        description: "Server-side Ingestion \u2014 quando o daemon indexa automaticamente e como habilitar ingest\xE3o client-side.",
+        args: {},
+        execute: async () => {
+          return JSON.stringify({ title: "memory-ingestion-guide", output: INGESTION_GUIDE });
         }
       })
     }
