@@ -378,14 +378,24 @@ init_contracts();
 var GraphClient = class {
   #baseUrl;
   #timeoutMs;
+  #inflight = /* @__PURE__ */ new Map();
+  // expose for gate check (member access) — also used internally
+  get inflight() {
+    return this.#inflight;
+  }
   constructor(opts) {
     this.#baseUrl = opts.baseUrl.replace(/\/+$/, "");
     this.#timeoutMs = opts.timeoutMs ?? 15e3;
   }
-  async #req(method, path, body) {
+  async #req(method, path, body, signal) {
     const url = `${this.#baseUrl}${path}`;
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), this.#timeoutMs);
+    const onExternalAbort = () => ac.abort(signal?.reason ?? void 0);
+    if (signal) {
+      if (signal.aborted) ac.abort(signal?.reason ?? void 0);
+      else signal.addEventListener("abort", onExternalAbort, { once: true });
+    }
     try {
       const headers = { "Content-Type": "application/json" };
       const init = { method, headers, signal: ac.signal };
@@ -416,111 +426,134 @@ var GraphClient = class {
       return await res.json();
     } finally {
       clearTimeout(timer);
+      if (signal) signal.removeEventListener("abort", onExternalAbort);
     }
   }
-  async #reqGraph(path, params) {
+  async #reqGraph(path, params, signal) {
     const qs = params ? "?" + new URLSearchParams(params).toString() : "";
-    return this.#req("GET", `/api/v1/graph${path}${qs}`);
+    return this.#req("GET", `/api/v1/graph${path}${qs}`, void 0, signal);
   }
-  async #postGraph(path, body) {
-    return this.#req("POST", `/api/v1/graph${path}`, body);
+  async #postGraph(path, body, signal) {
+    return this.#req("POST", `/api/v1/graph${path}`, body, signal);
   }
-  async status(root, expectedProjectId) {
+  async status(root, expectedProjectId, signal) {
     const params = { root };
     if (expectedProjectId) params.project_id = expectedProjectId;
-    return await this.#reqGraph("/status", params);
+    return await this.#reqGraph("/status", params, signal);
   }
   async ingest(root, opts) {
     const body = { root, refresh: opts?.refresh ?? false };
     if (opts?.expectedProjectId) body.project_id = opts.expectedProjectId;
-    return await this.#postGraph("/ingest", body);
+    return await this.#postGraph("/ingest", body, opts?.signal);
   }
   async symbols(root, opts) {
     const params = { root };
     if (opts?.query) params.q = opts.query;
     if (opts?.limit !== void 0) params.limit = String(opts.limit);
     if (opts?.expectedProjectId) params.project_id = opts.expectedProjectId;
-    return await this.#reqGraph("/symbols", params);
+    return await this.#reqGraph("/symbols", params, opts?.signal);
   }
   async search(root, opts) {
     const params = { root, query: opts.query };
     if (opts.topK !== void 0) params.topK = String(opts.topK);
     if (opts.hops !== void 0) params.hops = String(opts.hops);
     if (opts.expectedProjectId) params.project_id = opts.expectedProjectId;
-    return await this.#reqGraph("/search", params);
+    return await this.#reqGraph("/search", params, opts.signal);
   }
   async callers(root, opts) {
     if (!opts.id) throw new Error("id is required");
     const params = { root, id: opts.id };
     if (opts.limit !== void 0) params.limit = String(opts.limit);
     if (opts.expectedProjectId) params.project_id = opts.expectedProjectId;
-    return await this.#reqGraph("/callers", params);
+    return await this.#reqGraph("/callers", params, opts.signal);
   }
   async references(root, opts) {
     if (!opts.id) throw new Error("id is required");
     const params = { root, id: opts.id };
     if (opts.limit !== void 0) params.limit = String(opts.limit);
     if (opts.expectedProjectId) params.project_id = opts.expectedProjectId;
-    return await this.#reqGraph("/references", params);
+    return await this.#reqGraph("/references", params, opts.signal);
   }
   async tags(root, opts) {
     const body = { root, id: opts.id, terms: opts.terms };
     if (opts.source) body.source = opts.source;
     if (opts.expectedProjectId) body.project_id = opts.expectedProjectId;
-    return await this.#postGraph("/tags", body);
+    return await this.#postGraph("/tags", body, opts.signal);
   }
   async ensureReady(root, opts) {
+    const existing = this.#inflight.get(root);
+    if (existing) return existing;
+    const cap = 15e3;
     const deadline = opts?.deadlineMs ?? 18e4;
     const start = Date.now();
     let backoff = 2e3;
-    const pollOnce = async () => {
-      const st2 = await this.status(root, opts?.expectedProjectId);
-      opts?.onProgress?.(st2.state, st2.nodes);
-      return st2;
-    };
-    let st = await this.status(root, opts?.expectedProjectId);
-    opts?.onProgress?.(st.state, st.nodes);
-    if (st.state === "ready" && !opts?.refresh) {
-      return st;
-    }
-    if (st.state === "not_indexed" || st.state === "failed" || opts?.refresh) {
-      try {
-        st = await this.ingest(root, {
-          refresh: opts?.refresh,
-          expectedProjectId: opts?.expectedProjectId
-        });
-        opts?.onProgress?.(st.state, st.nodes);
-      } catch (e) {
-        if (e instanceof GraphError && e.status === 429) {
-          return { ...st, queued: true, retryAfter: e.retryAfter };
-        }
-        throw e;
+    const signal = opts?.signal;
+    const promise = (async () => {
+      let st = await this.status(root, opts?.expectedProjectId, signal);
+      opts?.onProgress?.(st.state, st.nodes);
+      if (st.state === "ready" && !opts?.refresh) {
+        return st;
       }
-    }
-    let retries = 1;
-    while (Date.now() - start < deadline) {
-      await sleep(Math.min(backoff, 15e3));
-      backoff = Math.min(backoff * 2, 15e3);
-      try {
-        st = await this.status(root, opts?.expectedProjectId);
-        opts?.onProgress?.(st.state, st.nodes);
-        if (st.state === "ready") {
-          return st;
+      if (st.state === "not_indexed" || st.state === "failed" || opts?.refresh) {
+        try {
+          st = await this.ingest(root, {
+            refresh: opts?.refresh,
+            expectedProjectId: opts?.expectedProjectId,
+            signal
+          });
+          opts?.onProgress?.(st.state, st.nodes);
+        } catch (e) {
+          if (e instanceof GraphError && e.status === 429) {
+            const raw = e.retryAfter;
+            const secs = parseInt(String(raw ?? ""), 10);
+            const backoffJitter = Math.min(cap, backoff * (0.8 + 0.4 * Math.random()));
+            const delay = isNaN(secs) ? Math.max(0, new Date(String(raw)).getTime() - Date.now()) : Math.min(cap, secs * 1e3);
+            const effectiveDelay = isNaN(delay) || delay < 0 ? backoffJitter : delay;
+            const finalDelay = Number.isFinite(effectiveDelay) ? effectiveDelay : backoffJitter;
+            const sleepDelay = Number.isNaN(finalDelay) ? backoffJitter : finalDelay;
+            await sleep(sleepDelay || backoffJitter, signal);
+            return { ...st, queued: true, retryAfter: e.retryAfter };
+          }
+          throw e;
         }
-        if (st.state === "failed" && retries > 0) {
-          retries--;
-          try {
-            await this.ingest(root, { expectedProjectId: opts?.expectedProjectId });
-          } catch {
+      }
+      let retries = 1;
+      while (Date.now() - start < deadline) {
+        if (signal?.aborted) break;
+        const backoffJitter = Math.min(cap, backoff * (0.8 + 0.4 * Math.random()));
+        await sleep(backoffJitter, signal);
+        backoff = Math.min(backoff * 2, cap);
+        try {
+          st = await this.status(root, opts?.expectedProjectId, signal);
+          opts?.onProgress?.(st.state, st.nodes);
+          if (st.state === "ready") {
+            return st;
+          }
+          if (st.state === "failed" && retries > 0) {
+            retries--;
+            try {
+              await this.ingest(root, { expectedProjectId: opts?.expectedProjectId, signal });
+            } catch {
+            }
+          }
+        } catch (e) {
+          if (e instanceof GraphError && e.status === 429) {
+            const raw = e.retryAfter;
+            const secs = parseInt(String(raw ?? ""), 10);
+            const retryBackoffJitter = Math.min(cap, backoff * (0.8 + 0.4 * Math.random()));
+            const delay = isNaN(secs) ? Math.max(0, new Date(String(raw)).getTime() - Date.now()) : Math.min(cap, secs * 1e3);
+            const effectiveDelay = isNaN(delay) || delay < 0 ? retryBackoffJitter : delay;
+            const finalDelay = Number.isFinite(effectiveDelay) ? effectiveDelay : retryBackoffJitter;
+            await sleep(finalDelay, signal);
+            return { ...st, queued: true, retryAfter: e.retryAfter };
           }
         }
-      } catch (e) {
-        if (e instanceof GraphError && e.status === 429) {
-          return { ...st, queued: true, retryAfter: e.retryAfter };
-        }
       }
-    }
-    return { ...st, timedOut: true };
+      return { ...st, timedOut: true };
+    })();
+    this.#inflight.set(root, promise);
+    promise.finally(() => this.#inflight.delete(root));
+    return promise;
   }
 };
 async function readGuard(client, root, cwd, fn) {
@@ -693,12 +726,9 @@ function recallOptsFromEnv(base) {
   }
   return defaults;
 }
-function clampText(s, n) {
-  return truncate(s, n);
-}
 function formatItem(block, item, opts) {
   const text = item.text ?? item.description ?? "";
-  const clamped = clampText(text, opts.maxCharsPerItem);
+  const clamped = truncate(text, opts.maxCharsPerItem);
   const score = item.score.toFixed(2);
   const pointerBlocks = ["skill", "skill_global", "setup"];
   if (pointerBlocks.includes(block)) {
@@ -753,7 +783,7 @@ async function fallbackSearch(client, projectId, query, opts) {
     });
     if (!resp.results.length) return { text: "", count: 0, source: "empty" };
     const lines = resp.results.slice(0, opts.maxItems).map((r) => {
-      const t = clampText(r.text, opts.maxCharsPerItem);
+      const t = truncate(r.text, opts.maxCharsPerItem);
       return `- (${r.score.toFixed(2)}) [${r.documentId}] ${t}`;
     });
     return { text: lines.join("\n"), count: resp.results.length, source: "search" };
@@ -779,12 +809,12 @@ async function graphFallback(graphClient, root, query, signal) {
     const cachedReady = isGraphReadyCached(root);
     if (cachedReady === false) return { text: "", count: 0, source: "empty" };
     if (cachedReady === null) {
-      const st = await graphClient.status(root);
+      const st = await graphClient.status(root, void 0, signal);
       if (signal.aborted) return { text: "", count: 0, source: "empty" };
       setGraphCache(root, st.state);
       if (st.state !== "ready" || st.nodes === 0) return { text: "", count: 0, source: "empty" };
     }
-    const res = await graphClient.search(root, { query, topK: 5, hops: 1 });
+    const res = await graphClient.search(root, { query, topK: 5, hops: 1, signal });
     if (signal.aborted) return { text: "", count: 0, source: "empty" };
     if (!res.seed.length && !res.expanded.length) return { text: "", count: 0, source: "empty" };
     const nodes = [...res.seed, ...res.expanded].slice(0, 8);
@@ -1406,7 +1436,7 @@ async function tagOnMiss(client, root, opts) {
 // src/dashboard.ts
 init_contracts();
 import { createServer } from "node:http";
-import { readFileSync as readFileSync4, writeFileSync as writeFileSync2, existsSync as existsSync4, mkdirSync as mkdirSync2 } from "node:fs";
+import { readFileSync as readFileSync4, writeFileSync as writeFileSync2, existsSync as existsSync4, mkdirSync as mkdirSync2, renameSync as renameSync2, unlinkSync } from "node:fs";
 import { join as join4 } from "node:path";
 import { homedir as homedir3 } from "node:os";
 init_config();
@@ -1428,8 +1458,49 @@ function readPortFile(dir) {
 function writePortFile(dir, port) {
   try {
     mkdirSync2(dir, { recursive: true });
-    writeFileSync2(portFilePath(dir), JSON.stringify({ port }));
+    const file = portFilePath(dir);
+    const tmp = `${file}.tmp.${process.pid}`;
+    writeFileSync2(tmp, JSON.stringify({ port }));
+    try {
+      renameSync2(tmp, file);
+    } catch (e) {
+      try {
+        unlinkSync(tmp);
+      } catch {
+      }
+      throw e;
+    }
   } catch {
+  }
+}
+var activeDashboardPorts = /* @__PURE__ */ new Set();
+async function isAlive(port, timeoutMs = 500) {
+  try {
+    let signal;
+    let timer;
+    if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") {
+      signal = AbortSignal.timeout(timeoutMs);
+    } else {
+      const ac = new AbortController();
+      signal = ac.signal;
+      void sleep(timeoutMs).then(() => {
+        try {
+          ac.abort();
+        } catch {
+        }
+      });
+      timer = setTimeout(() => {
+        try {
+          ac.abort();
+        } catch {
+        }
+      }, timeoutMs);
+    }
+    const r = await fetch(`http://127.0.0.1:${port}/api/data`, { signal });
+    if (timer) clearTimeout(timer);
+    return r.ok;
+  } catch {
+    return false;
   }
 }
 function spaHtml() {
@@ -1587,6 +1658,7 @@ var MemoryDashboard = class {
   #url = null;
   #clientCache = null;
   #clientUrl = null;
+  #starting = null;
   url = null;
   constructor(opts) {
     this.#cwdProvider = opts?.cwdProvider ?? (() => process.cwd());
@@ -1739,41 +1811,71 @@ var MemoryDashboard = class {
   }
   async startServer() {
     if (this.#server) return await this.ensureServer();
-    const preferred = readPortFile(this.#portDir);
-    const port = preferred ?? 0;
-    return new Promise((resolve) => {
-      const server = createServer((req, res) => {
-        this.#handleRequest(req, res);
-      });
-      server.listen(port, "127.0.0.1", () => {
-        const addr = server.address();
-        if (addr && typeof addr === "object") {
-          const actualPort = addr.port;
-          this.#server = server;
-          this.#url = `http://127.0.0.1:${actualPort}`;
-          this.url = this.#url;
-          writePortFile(this.#portDir, actualPort);
-          resolve(this.#url);
-        } else {
-          resolve("http://127.0.0.1:0");
-        }
-      });
-      server.on("error", () => {
-        const fallback = createServer((req, res) => {
+    if (this.#starting) return this.#starting;
+    this.#starting = (async () => {
+      const preferred = readPortFile(this.#portDir);
+      if (preferred && !activeDashboardPorts.has(preferred) && await isAlive(preferred)) {
+        this.#url = `http://127.0.0.1:${preferred}`;
+        this.url = this.#url;
+        return this.#url;
+      }
+      return new Promise((resolve) => {
+        const server = createServer((req, res) => {
           this.#handleRequest(req, res);
         });
-        fallback.listen(0, "127.0.0.1", () => {
-          const addr = fallback.address();
+        server.listen(0, "127.0.0.1", async () => {
+          const addr = server.address();
           if (addr && typeof addr === "object") {
-            this.#server = fallback;
-            this.#url = `http://127.0.0.1:${addr.port}`;
+            const actualPort = addr.port;
+            this.#server = server;
+            this.#url = `http://127.0.0.1:${actualPort}`;
             this.url = this.#url;
-            writePortFile(this.#portDir, addr.port);
+            writePortFile(this.#portDir, actualPort);
+            activeDashboardPorts.add(actualPort);
+            try {
+              const after = readPortFile(this.#portDir);
+              if (after !== null && after !== actualPort && await isAlive(after)) {
+                try {
+                  server.close();
+                } catch {
+                }
+                activeDashboardPorts.delete(actualPort);
+                this.#server = null;
+                this.#url = `http://127.0.0.1:${after}`;
+                this.url = this.#url;
+                resolve(this.#url);
+                return;
+              }
+            } catch {
+            }
+            resolve(this.#url);
+          } else {
+            resolve("http://127.0.0.1:0");
           }
-          resolve(this.#url ?? "http://127.0.0.1:0");
+        });
+        server.on("error", () => {
+          const fallback = createServer((req, res) => {
+            this.#handleRequest(req, res);
+          });
+          fallback.listen(0, "127.0.0.1", () => {
+            const addr = fallback.address();
+            if (addr && typeof addr === "object") {
+              this.#server = fallback;
+              this.#url = `http://127.0.0.1:${addr.port}`;
+              this.url = this.#url;
+              writePortFile(this.#portDir, addr.port);
+              activeDashboardPorts.add(addr.port);
+            }
+            resolve(this.#url ?? "http://127.0.0.1:0");
+          });
         });
       });
-    });
+    })();
+    try {
+      return await this.#starting;
+    } finally {
+      this.#starting = null;
+    }
   }
   async #handleRequest(req, res) {
     const url = req.url ?? "/";
@@ -1857,7 +1959,7 @@ var MemoryDashboard = class {
 };
 
 // src/provision.ts
-import { existsSync as existsSync5, readFileSync as readFileSync5, rmSync, writeFileSync as writeFileSync3, unlinkSync } from "node:fs";
+import { existsSync as existsSync5, readFileSync as readFileSync5, rmSync, writeFileSync as writeFileSync3, unlinkSync as unlinkSync2 } from "node:fs";
 import { join as join5 } from "node:path";
 import { homedir as homedir4 } from "node:os";
 import { spawn } from "node:child_process";
@@ -1985,7 +2087,7 @@ async function acquireLock(dir, opts) {
 function releaseLock(dir) {
   try {
     const lp = lockPath(dir);
-    if (existsSync5(lp)) unlinkSync(lp);
+    if (existsSync5(lp)) unlinkSync2(lp);
   } catch {
   }
 }
@@ -2253,14 +2355,22 @@ import { z } from "zod";
 var recallCache = /* @__PURE__ */ new Map();
 var turnCount = /* @__PURE__ */ new Map();
 var MAX_SESSION_CACHE = 500;
-function evictIfNeeded(map, max) {
-  if (map.size <= max) return;
-  const toEvict = map.size - max;
+function evictIfNeeded(collection, max) {
+  if (collection.size <= max) return;
+  const toEvict = collection.size - max;
   let evicted = 0;
-  for (const key of map.keys()) {
-    if (evicted >= toEvict) break;
-    map.delete(key);
-    evicted++;
+  if (collection instanceof Set) {
+    for (const key of collection) {
+      if (evicted >= toEvict) break;
+      collection.delete(key);
+      evicted++;
+    }
+  } else {
+    for (const key of collection.keys()) {
+      if (evicted >= toEvict) break;
+      collection.delete(key);
+      evicted++;
+    }
   }
 }
 var daemonCache = null;
@@ -2272,7 +2382,7 @@ var graphClientInstance = null;
 var graphClientBaseUrl = null;
 var reviewSessions = /* @__PURE__ */ new Set();
 var lastReviewAt = 0;
-var curationInFlight = false;
+var curationInFlight = /* @__PURE__ */ new Set();
 var dashboard = null;
 function getClient(url) {
   if (!clientInstance || clientBaseUrl !== url) {
@@ -2288,26 +2398,34 @@ function getGraphClient(url) {
   }
   return graphClientInstance;
 }
-async function getDaemonInfo() {
-  const now = Date.now();
-  if (daemonCache && now - daemonCacheAt < DAEMON_CACHE_TTL_MS) {
-    return daemonCache;
+async function withDaemon(fn, fallback, signal) {
+  try {
+    const now = Date.now();
+    let daemon = null;
+    if (daemonCache && now - daemonCacheAt < DAEMON_CACHE_TTL_MS) {
+      daemon = daemonCache;
+    } else {
+      const result = await resolveDaemon();
+      if (result.info) {
+        daemonCache = { url: result.info.url, features: result.info.features ?? null };
+        daemonCacheAt = now;
+        daemon = daemonCache;
+      } else {
+        daemonCache = null;
+        daemonCacheAt = now;
+        daemon = null;
+      }
+    }
+    if (!daemon) return fallback;
+    return await fn(daemon.url, signal);
+  } catch (e) {
+    if (typeof fallback === "string") return JSON.stringify({ ok: false, error: explainError(e) });
+    return fallback;
   }
-  const result = await resolveDaemon();
-  if (result.info) {
-    daemonCache = { url: result.info.url, features: result.info.features ?? null };
-    daemonCacheAt = now;
-    return daemonCache;
-  }
-  daemonCache = null;
-  daemonCacheAt = now;
-  return null;
 }
 async function handleGraphIngest(root, refresh, workdir, projectId) {
-  try {
-    const daemon = await getDaemonInfo();
-    if (!daemon) return JSON.stringify({ ok: false, error: "Daemon not available" });
-    const gc = getGraphClient(daemon.url);
+  return withDaemon(async (url) => {
+    const gc = getGraphClient(url);
     const effectiveRoot = root ?? workdir;
     const result = await gc.ingest(effectiveRoot, {
       refresh,
@@ -2320,9 +2438,7 @@ async function handleGraphIngest(root, refresh, workdir, projectId) {
       state: result.state,
       status: result.status
     });
-  } catch (e) {
-    return JSON.stringify({ ok: false, error: explainError(e) });
-  }
+  }, JSON.stringify({ ok: false, error: "Daemon not available" }));
 }
 var OpenCodeMemory = async (ctx, options) => {
   const opts = options ?? {};
@@ -2331,7 +2447,19 @@ var OpenCodeMemory = async (ctx, options) => {
   return {
     "experimental.chat.system.transform": async (_input, output) => {
       try {
-        const daemon = await getDaemonInfo();
+        const daemon = await (async () => {
+          const now = Date.now();
+          if (daemonCache && now - daemonCacheAt < DAEMON_CACHE_TTL_MS) return daemonCache;
+          const result = await resolveDaemon();
+          if (result.info) {
+            daemonCache = { url: result.info.url, features: result.info.features ?? null };
+            daemonCacheAt = now;
+            return daemonCache;
+          }
+          daemonCache = null;
+          daemonCacheAt = now;
+          return null;
+        })();
         if (!daemon) {
           const gate = await serverGate();
           if (gate.alert) output.system.push(gate.alert);
@@ -2352,7 +2480,19 @@ var OpenCodeMemory = async (ctx, options) => {
     },
     "chat.message": async (input, _output) => {
       try {
-        const daemon = await getDaemonInfo();
+        const daemon = await (async () => {
+          const now = Date.now();
+          if (daemonCache && now - daemonCacheAt < DAEMON_CACHE_TTL_MS) return daemonCache;
+          const result = await resolveDaemon();
+          if (result.info) {
+            daemonCache = { url: result.info.url, features: result.info.features ?? null };
+            daemonCacheAt = now;
+            return daemonCache;
+          }
+          daemonCache = null;
+          daemonCacheAt = now;
+          return null;
+        })();
         if (!daemon) return;
         const sessionId = input.sessionID;
         const currentTurn = (turnCount.get(sessionId) ?? 0) + 1;
@@ -2399,7 +2539,7 @@ var OpenCodeMemory = async (ctx, options) => {
         const turns = turnCount.get(sessionId) ?? 0;
         const decision = decideReview({
           isReviewSession: reviewSessions.has(sessionId),
-          inFlight: curationInFlight,
+          inFlight: curationInFlight.has(sessionId),
           turns,
           lastReviewAt,
           now: Date.now(),
@@ -2407,9 +2547,21 @@ var OpenCodeMemory = async (ctx, options) => {
           cooldownMs: 6e5
         });
         if (decision.review) {
-          const daemon = await getDaemonInfo();
+          const daemon = await (async () => {
+            const now = Date.now();
+            if (daemonCache && now - daemonCacheAt < DAEMON_CACHE_TTL_MS) return daemonCache;
+            const result = await resolveDaemon();
+            if (result.info) {
+              daemonCache = { url: result.info.url, features: result.info.features ?? null };
+              daemonCacheAt = now;
+              return daemonCache;
+            }
+            daemonCache = null;
+            daemonCacheAt = now;
+            return null;
+          })();
           if (!daemon) return;
-          curationInFlight = true;
+          curationInFlight.add(sessionId);
           const sdkSession = ctx?.client?.session;
           const hasRealSession = sdkSession !== null && typeof sdkSession === "object" && typeof sdkSession.messages === "function" && typeof sdkSession.create === "function" && typeof sdkSession.prompt === "function";
           const curationClient = hasRealSession ? { session: sdkSession } : {
@@ -2440,9 +2592,9 @@ var OpenCodeMemory = async (ctx, options) => {
             const commit = commitReview({ status: res.status, now: Date.now() });
             if (commit.resetTurns) turnCount.set(sessionId, 0);
             if (commit.lastReviewAt !== null) lastReviewAt = commit.lastReviewAt;
-            curationInFlight = false;
+            curationInFlight.delete(sessionId);
           }).catch(() => {
-            curationInFlight = false;
+            curationInFlight.delete(sessionId);
           });
         }
       }
@@ -2452,50 +2604,38 @@ var OpenCodeMemory = async (ctx, options) => {
         description: "Check memory daemon status, features, and resolved project_id",
         args: {},
         execute: async () => {
-          try {
-            const daemon = await getDaemonInfo();
-            const pid = tryResolveProjectId(workdir);
-            return JSON.stringify({
-              ok: true,
-              daemon: daemon ? { url: daemon.url, features: daemon.features } : null,
-              projectId: pid
-            });
-          } catch (e) {
-            return JSON.stringify({ ok: false, error: String(e) });
-          }
+          const pid = tryResolveProjectId(workdir);
+          const fallbackDaemonNull = JSON.stringify({ ok: true, daemon: null, projectId: pid });
+          return withDaemon(async (url, _signal) => {
+            void _signal;
+            const features = daemonCache?.features ?? null;
+            return JSON.stringify({ ok: true, daemon: { url, features }, projectId: pid });
+          }, fallbackDaemonNull);
         }
       }),
       memory_search: tool({
         description: "Semantic search across project memory",
         args: { query: z.string(), topK: z.number().optional() },
         execute: async (args) => {
-          try {
-            const daemon = await getDaemonInfo();
-            if (!daemon) return JSON.stringify({ results: [], count: 0 });
-            const client = getClient(daemon.url);
+          return withDaemon(async (url) => {
+            const client = getClient(url);
             const resp = await client.search(args.query, {
               topK: args.topK ?? 5,
               metadata: projectId ? { project_id: projectId } : void 0
             });
             return JSON.stringify(resp);
-          } catch {
-            return JSON.stringify({ results: [], count: 0 });
-          }
+          }, JSON.stringify({ results: [], count: 0 }));
         }
       }),
       memory_get: tool({
         description: "Get a memory document by ID",
         args: { id: z.string() },
         execute: async (args) => {
-          try {
-            const daemon = await getDaemonInfo();
-            if (!daemon) return "null";
-            const client = getClient(daemon.url);
+          return withDaemon(async (url) => {
+            const client = getClient(url);
             const doc = await client.getDocument(args.id);
             return JSON.stringify(doc);
-          } catch {
-            return "null";
-          }
+          }, "null");
         }
       }),
       memory_save: tool({
@@ -2505,18 +2645,14 @@ var OpenCodeMemory = async (ctx, options) => {
           metadata: z.record(z.string(), z.string()).optional()
         },
         execute: async (args) => {
-          try {
-            const daemon = await getDaemonInfo();
-            if (!daemon) return JSON.stringify({ ok: false, error: "Daemon not available" });
-            const client = getClient(daemon.url);
+          return withDaemon(async (url) => {
+            const client = getClient(url);
             const doc = await client.save(args.content, {
               ...args.metadata,
               ...projectId ? { project_id: projectId } : {}
             });
             return JSON.stringify({ ok: true, id: doc.id });
-          } catch (e) {
-            return JSON.stringify({ ok: false, error: String(e) });
-          }
+          }, JSON.stringify({ ok: false, error: "Daemon not available" }));
         }
       }),
       memory_save_skill: tool({
@@ -2527,14 +2663,12 @@ var OpenCodeMemory = async (ctx, options) => {
           body: z.string().describe("Body in English (## What, ## When to use, ## Do, ## Don't)")
         },
         execute: async (args) => {
-          try {
-            const validation = validateSkill(args);
-            if (!validation.valid) {
-              return JSON.stringify({ ok: false, errors: validation.errors });
-            }
-            const daemon = await getDaemonInfo();
-            if (!daemon) return JSON.stringify({ ok: false, error: "Daemon not available" });
-            const client = getClient(daemon.url);
+          const validation = validateSkill(args);
+          if (!validation.valid) {
+            return JSON.stringify({ ok: false, errors: validation.errors });
+          }
+          return withDaemon(async (url) => {
+            const client = getClient(url);
             const doc = buildSkillDocument(args, {
               source: "curation",
               ...projectId ? { project_id: projectId } : {}
@@ -2552,19 +2686,15 @@ var OpenCodeMemory = async (ctx, options) => {
             if (doc.metadata.evidence) flatMeta.evidence = JSON.stringify(doc.metadata.evidence);
             const saved = await client.save(doc.content, flatMeta);
             return JSON.stringify({ ok: true, id: saved.id, warnings: validation.warnings });
-          } catch (e) {
-            return JSON.stringify({ ok: false, error: String(e) });
-          }
+          }, JSON.stringify({ ok: false, error: "Daemon not available" }));
         }
       }),
       memory_list_skills: tool({
         description: "List skills in the project (active and candidates).",
         args: {},
         execute: async () => {
-          try {
-            const daemon = await getDaemonInfo();
-            if (!daemon) return JSON.stringify({ skills: [], count: 0 });
-            const client = getClient(daemon.url);
+          return withDaemon(async (url) => {
+            const client = getClient(url);
             const resp = await client.list({
               metadata: projectId ? { project_id: projectId } : void 0
             });
@@ -2580,9 +2710,7 @@ var OpenCodeMemory = async (ctx, options) => {
               })),
               count: skills.length
             });
-          } catch {
-            return JSON.stringify({ skills: [], count: 0 });
-          }
+          }, JSON.stringify({ skills: [], count: 0 }));
         }
       }),
       // ─── Graph Tools (Phase 3) ────────────────────────────────────────────
@@ -2590,10 +2718,8 @@ var OpenCodeMemory = async (ctx, options) => {
         description: "Check semantic code graph status (nodes, edges, hubs). Read-only, does not index.",
         args: { root: z.string().optional().describe("Project root directory") },
         execute: async (args) => {
-          try {
-            const daemon = await getDaemonInfo();
-            if (!daemon) return JSON.stringify({ ok: false, error: "Daemon not available" });
-            const gc = getGraphClient(daemon.url);
+          return withDaemon(async (url) => {
+            const gc = getGraphClient(url);
             const root = args.root ?? workdir;
             const st = await gc.status(root, projectId ?? void 0);
             return JSON.stringify({
@@ -2607,9 +2733,7 @@ var OpenCodeMemory = async (ctx, options) => {
               report: st.report,
               hint: st.hint
             });
-          } catch (e) {
-            return JSON.stringify({ ok: false, error: explainError(e) });
-          }
+          }, JSON.stringify({ ok: false, error: "Daemon not available" }));
         }
       }),
       graph_ingest: tool({
@@ -2636,10 +2760,8 @@ var OpenCodeMemory = async (ctx, options) => {
           limit: z.number().optional().describe("Max symbols to return")
         },
         execute: async (args) => {
-          try {
-            const daemon = await getDaemonInfo();
-            if (!daemon) return JSON.stringify({ ok: false, error: "Daemon not available" });
-            const gc = getGraphClient(daemon.url);
+          return withDaemon(async (url) => {
+            const gc = getGraphClient(url);
             const root = args.root ?? workdir;
             const result = await gc.symbols(root, {
               query: args.query,
@@ -2655,9 +2777,7 @@ var OpenCodeMemory = async (ctx, options) => {
               truncated: result.truncated,
               hint: result.hint
             });
-          } catch (e) {
-            return JSON.stringify({ ok: false, error: explainError(e) });
-          }
+          }, JSON.stringify({ ok: false, error: "Daemon not available" }));
         }
       }),
       graph_search: tool({
@@ -2669,11 +2789,9 @@ var OpenCodeMemory = async (ctx, options) => {
           hops: z.number().optional().describe("Expansion hops (1-2)")
         },
         execute: async (args) => {
-          try {
-            const daemon = await getDaemonInfo();
-            if (!daemon) return JSON.stringify({ ok: false, error: "Daemon not available" });
+          return withDaemon(async (url) => {
             return readGuard(
-              getGraphClient(daemon.url),
+              getGraphClient(url),
               args.root ?? workdir,
               workdir,
               async (gc, root) => {
@@ -2696,9 +2814,7 @@ var OpenCodeMemory = async (ctx, options) => {
                 });
               }
             );
-          } catch (e) {
-            return JSON.stringify({ ok: false, error: explainError(e) });
-          }
+          }, JSON.stringify({ ok: false, error: "Daemon not available" }));
         }
       }),
       graph_callers: tool({
@@ -2709,11 +2825,9 @@ var OpenCodeMemory = async (ctx, options) => {
           limit: z.number().optional().describe("Max callers to return")
         },
         execute: async (args) => {
-          try {
-            const daemon = await getDaemonInfo();
-            if (!daemon) return JSON.stringify({ ok: false, error: "Daemon not available" });
+          return withDaemon(async (url) => {
             return readGuard(
-              getGraphClient(daemon.url),
+              getGraphClient(url),
               args.root ?? workdir,
               workdir,
               async (gc, root) => {
@@ -2735,9 +2849,7 @@ var OpenCodeMemory = async (ctx, options) => {
                 });
               }
             );
-          } catch (e) {
-            return JSON.stringify({ ok: false, error: explainError(e) });
-          }
+          }, JSON.stringify({ ok: false, error: "Daemon not available" }));
         }
       }),
       graph_references: tool({
@@ -2748,11 +2860,9 @@ var OpenCodeMemory = async (ctx, options) => {
           limit: z.number().optional().describe("Max references to return")
         },
         execute: async (args) => {
-          try {
-            const daemon = await getDaemonInfo();
-            if (!daemon) return JSON.stringify({ ok: false, error: "Daemon not available" });
+          return withDaemon(async (url) => {
             return readGuard(
-              getGraphClient(daemon.url),
+              getGraphClient(url),
               args.root ?? workdir,
               workdir,
               async (gc, root) => {
@@ -2774,9 +2884,7 @@ var OpenCodeMemory = async (ctx, options) => {
                 });
               }
             );
-          } catch (e) {
-            return JSON.stringify({ ok: false, error: explainError(e) });
-          }
+          }, JSON.stringify({ ok: false, error: "Daemon not available" }));
         }
       }),
       graph_analyze: tool({
@@ -2787,10 +2895,8 @@ var OpenCodeMemory = async (ctx, options) => {
           refresh: z.boolean().optional().describe("Force re-index")
         },
         execute: async (args) => {
-          try {
-            const daemon = await getDaemonInfo();
-            if (!daemon) return JSON.stringify({ ok: false, error: "Daemon not available" });
-            const gc = getGraphClient(daemon.url);
+          return withDaemon(async (url) => {
+            const gc = getGraphClient(url);
             const root = args.root ?? workdir;
             const result = await gc.ensureReady(root, {
               expectedProjectId: projectId ?? void 0,
@@ -2829,9 +2935,7 @@ var OpenCodeMemory = async (ctx, options) => {
               report: result.report,
               hint: result.hint
             });
-          } catch (e) {
-            return JSON.stringify({ ok: false, error: explainError(e) });
-          }
+          }, JSON.stringify({ ok: false, error: "Daemon not available" }));
         }
       }),
       graph_tag_node: tool({
@@ -2845,10 +2949,8 @@ var OpenCodeMemory = async (ctx, options) => {
           source: z.string().optional().describe("Tag source label")
         },
         execute: async (args) => {
-          try {
-            const daemon = await getDaemonInfo();
-            if (!daemon) return JSON.stringify({ ok: false, error: "Daemon not available" });
-            const gc = getGraphClient(daemon.url);
+          return withDaemon(async (url) => {
+            const gc = getGraphClient(url);
             const root = args.root ?? workdir;
             if (args.id) {
               let tagTerms = args.terms;
@@ -2901,9 +3003,7 @@ var OpenCodeMemory = async (ctx, options) => {
               ok: false,
               error: "Provide either (id + terms/query) or (expectedName + query)."
             });
-          } catch (e) {
-            return JSON.stringify({ ok: false, error: explainError(e) });
-          }
+          }, JSON.stringify({ ok: false, error: "Daemon not available" }));
         }
       }),
       // ─── Dashboard Tools (Phase 4) ────────────────────────────────────────
