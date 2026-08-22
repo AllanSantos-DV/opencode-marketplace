@@ -41,9 +41,10 @@ const indexHtml = `<!DOCTYPE html>
           <span class="category">${plugin.category}</span>
         </div>
         <div class="plugin-links">
+          <a href="https://www.npmjs.com/package/@allansantos-dev/opencode-memory" target="_blank"><img src="https://img.shields.io/npm/v/@allansantos-dev/opencode-memory" alt="npm version"></a>
           <a href="${plugin.homepage}" target="_blank">GitHub</a>
-          <a href="p/${plugin.name}/">Documentação</a>
         </div>
+        <pre><code>opencode.json: ["@allansantos-dev/opencode-memory"]</code></pre>
       </article>`
         )
         .join("")}
@@ -59,6 +60,14 @@ const indexHtml = `<!DOCTYPE html>
 // Write index.html
 mkdirSync(join(DOCS, "assets"), { recursive: true });
 writeFileSync(join(DOCS, "index.html"), indexHtml);
+
+// Generate p/<name>/index.html for each plugin
+for (const plugin of marketplace.plugins) {
+  const pDir = join(DOCS, "p", plugin.name);
+  mkdirSync(pDir, { recursive: true });
+  const pHtml = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><title>${plugin.name} — ${marketplace.name}</title><link rel="stylesheet" href="../../assets/styles.css"></head><body><header><h1>${plugin.name} v${plugin.version}</h1><p>${plugin.description}</p></header><main><pre><code>npm i @allansantos-dev/opencode-memory\n// opencode.json: ["@allansantos-dev/opencode-memory"]</code></pre><p><a href="${plugin.homepage}">GitHub</a> · <a href="https://www.npmjs.com/package/@allansantos-dev/opencode-memory">npm</a></p></main></body></html>`;
+  writeFileSync(join(pDir, "index.html"), pHtml);
+}
 
 // Generate README table
 const readme = readFileSync(README, "utf-8");
