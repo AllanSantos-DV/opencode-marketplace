@@ -272,6 +272,7 @@ img{max-width:100%}
 @media (max-width:980px){.tools-grid{grid-template-columns:repeat(2, minmax(0,1fr))}}
 @media (max-width:560px){.tools-grid{grid-template-columns:1fr}}
 
+.fiche[hidden]{display:none}
 .fiche{
   background:var(--surface);border:1px solid var(--line);border-radius:14px;
   padding:16px 16px 14px;display:flex;flex-direction:column;gap:10px;

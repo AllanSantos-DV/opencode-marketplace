@@ -178,10 +178,10 @@
 
         <div class="tools-toolbar">
           <div class="filter-group" role="tablist" aria-label="Filtrar tools">
-            <button class="filter-btn" type="button" is-active" data-filter="all" role="tab" aria-selected="true">todas · 19</button>
-            <button class="filter-btn" type="button"" data-filter="memory" role="tab" aria-selected="false">memória · 6</button>
-            <button class="filter-btn" type="button"" data-filter="graph" role="tab" aria-selected="false">grafo · 10</button>
-            <button class="filter-btn" type="button"" data-filter="system" role="tab" aria-selected="false">sistema · 3</button>
+            <button class="filter-btn is-active" type="button" data-filter="all" role="tab" aria-selected="true">todas · 19</button>
+            <button class="filter-btn" type="button" data-filter="memory" role="tab" aria-selected="false">memória · 6</button>
+            <button class="filter-btn" type="button" data-filter="graph" role="tab" aria-selected="false">grafo · 10</button>
+            <button class="filter-btn" type="button" data-filter="system" role="tab" aria-selected="false">sistema · 3</button>
           </div>
           <span class="tools-count" aria-live="polite"><span id="tools-count-num">19</span> tools</span>
         </div>
@@ -275,11 +275,19 @@
   <script>
   // Copy buttons
   document.querySelectorAll('[data-copy]').forEach(btn => {
+    const original = btn.textContent;
+    let timer = null;
     btn.addEventListener('click', async () => {
-      try { await navigator.clipboard.writeText(btn.dataset.copy); }
-      catch { const ta=document.createElement('textarea'); ta.value=btn.dataset.copy; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); }
-      const prev = btn.textContent; btn.textContent = 'Copiado ✓'; btn.dataset.copied = 'true';
-      setTimeout(()=>{ btn.textContent = prev; btn.dataset.copied='false'; }, 1600);
+      let ok = false;
+      try { await navigator.clipboard.writeText(btn.dataset.copy); ok = true; }
+      catch {
+        try {
+          const ta=document.createElement('textarea'); ta.value=btn.dataset.copy; ta.setAttribute('readonly',''); ta.style.cssText='position:fixed;left:-9999px;top:0'; document.body.appendChild(ta); ta.select(); ok = document.execCommand('copy'); ta.remove();
+        } catch { ok = false; }
+      }
+      btn.textContent = ok ? 'Copiado ✓' : 'Falhou — selecione e copie manualmente'; btn.dataset.copied = String(ok);
+      if(timer) clearTimeout(timer);
+      timer = setTimeout(()=>{ btn.textContent = original; btn.dataset.copied='false'; }, 1600);
     });
   });
   // Filter fiches
