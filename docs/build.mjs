@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
+import { readFileSync, writeFileSync, mkdirSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 
@@ -6,67 +6,20 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, "..");
 const MARKETPLACE = join(ROOT, ".github/plugin/marketplace.json");
 const README = join(ROOT, "README.md");
-const DOCS = join(ROOT, "docs");
 
 // Read marketplace.json
 const marketplace = JSON.parse(readFileSync(MARKETPLACE, "utf-8"));
 
-// Generate index.html
-const indexHtml = `<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${marketplace.name} - Marketplace de Plugins do OpenCode</title>
-  <meta name="description" content="${marketplace.metadata.description}">
-  <link rel="stylesheet" href="assets/styles.css">
-</head>
-<body>
-  <header>
-    <h1>${marketplace.name}</h1>
-    <p>${marketplace.metadata.description}</p>
-  </header>
-  
-  <main>
-    <h2>Plugins Disponíveis</h2>
-    <div class="plugins-grid">
-      ${marketplace.plugins
-        .map(
-          (plugin) => `
-      <article class="plugin-card">
-        <h3>${plugin.name}</h3>
-        <p>${plugin.description}</p>
-        <div class="plugin-meta">
-          <span class="version">v${plugin.version}</span>
-          <span class="category">${plugin.category}</span>
-        </div>
-        <div class="plugin-links">
-          <a href="https://allansantos-dv.github.io/opencode-memory/" target="_blank">Docs</a>
-          <a href="https://www.npmjs.com/package/@allansantos-dev/opencode-memory" target="_blank"><img src="https://img.shields.io/npm/v/@allansantos-dev/opencode-memory" alt="npm version"></a>
-          <a href="${plugin.homepage}" target="_blank">GitHub</a>
-        </div>
-        <pre><code>opencode.json: ["@allansantos-dev/opencode-memory"]</code></pre>
-      </article>`
-        )
-        .join("")}
-    </div>
-  </main>
-  
-  <footer>
-    <p>Marketplace de plugins do OpenCode</p>
-  </footer>
-</body>
-</html>`;
+// NOTE: docs/index.html e docs/assets/styles.css são escritos à mão (Laboratory Archive)
+// e NÃO são gerados aqui — build.mjs apenas garante o redirect p/<name> e atualiza o README.
+// Isso evita que um template genérico sobrescreva o design opinativo.
 
-// Write index.html
-mkdirSync(join(DOCS, "assets"), { recursive: true });
-writeFileSync(join(DOCS, "index.html"), indexHtml);
-
-// Generate p/<name>/index.html for each plugin
+// Ensure p/<name>/index.html redirect for each plugin (preserve hand-written design)
 for (const plugin of marketplace.plugins) {
-  const pDir = join(DOCS, "p", plugin.name);
+  const pDir = join(__dirname, "p", plugin.name);
   mkdirSync(pDir, { recursive: true });
-  const pHtml = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><meta http-equiv="refresh" content="0; url=https://allansantos-dv.github.io/opencode-memory/"><title>${plugin.name} — ${marketplace.name}</title><link rel="stylesheet" href="../../assets/styles.css"></head><body><p>Redirecionando para <a href="https://allansantos-dv.github.io/opencode-memory/">docs do plugin</a>...</p></body></html>`;
+  const redirectUrl = "https://allansantos-dv.github.io/opencode-memory/";
+  const pHtml = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>${plugin.name} — ${marketplace.name}</title><meta http-equiv="refresh" content="0; url=${redirectUrl}"><link rel="canonical" href="${redirectUrl}"><meta name="robots" content="noindex"><link rel="stylesheet" href="../../assets/styles.css"><style>body{display:grid;place-items:center;min-height:100vh;padding:24px} .card{max-width:520px;width:100%;background:var(--surface);border:1px solid var(--line-strong);border-radius:16px;padding:28px;box-shadow:var(--shadow);text-align:center} .card h1{font-family:"Bricolage Grotesque",sans-serif;font-size:22px;margin-bottom:8px} .card p{color:var(--muted);font-size:14px;margin-bottom:16px} .card a{color:var(--graph)}</style></head><body><div class="card"><p style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)">opencode-marketplace · plugin</p><h1>${plugin.name} → docs</h1><p>Redirecionando para <a href="${redirectUrl}">${redirectUrl}</a>…</p><a class="btn btn--signal" href="${redirectUrl}">Abrir docs agora →</a><p style="margin-top:14px"><a href="../../">← Voltar à vitrine</a></p></div><script>location.replace("${redirectUrl}");</script></body></html>`;
   writeFileSync(join(pDir, "index.html"), pHtml);
 }
 
@@ -92,5 +45,6 @@ writeFileSync(README, newReadme);
 
 console.log("✅ Vitrine gerada com sucesso!");
 console.log(`   - ${marketplace.plugins.length} plugin(s)`);
-console.log(`   - Index: ${join(DOCS, "index.html")}`);
+console.log(`   - Index: ${join(__dirname, "index.html")} (hand-written, preservado)`);
+console.log(`   - Redirect: p/memory → https://allansantos-dv.github.io/opencode-memory/`);
 console.log(`   - README: ${README}`);
