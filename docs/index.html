@@ -296,7 +296,8 @@
         el.hidden = !show;
         if(show) n++;
       });
-      if(countEl) countEl.textContent = String(n);
+      if(!countEl) throw new Error('tools-count-num missing');
+      countEl.textContent = String(n);
     });
   });
   // Reveal on scroll + toc active
