@@ -1,6 +1,6 @@
 {
   "name": "memory",
-  "version": "0.1.2",
+  "version": "0.1.5",
   "description": "Memória persistente entre sessões para o OpenCode - recall semântico, grafo de código, dashboard visual e curadoria automática",
   "author": {
     "name": "Allan Santos",
@@ -9,6 +9,12 @@
   "homepage": "https://github.com/AllanSantos-DV/opencode-memory",
   "repository": "https://github.com/AllanSantos-DV/opencode-memory",
   "license": "MIT",
-  "keywords": ["memory", "recall", "graph", "dashboard", "curation"],
+  "keywords": [
+    "memory",
+    "recall",
+    "graph",
+    "dashboard",
+    "curation"
+  ],
   "category": "productivity"
 }
