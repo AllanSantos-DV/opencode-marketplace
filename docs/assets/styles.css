@@ -434,7 +434,7 @@ img{max-width:100%}
   .hero{padding-top:20px}
   .hero__actions .btn{flex:1 1 auto;justify-content:center}
   .snippet{flex-wrap:wrap}
-  .snippet pre{flex-basis:100%;order:2;white-space:pre-wrap;word-break:break-all}
+  .snippet pre{flex-basis:100%;order:2;white-space:pre-wrap;overflow-wrap:anywhere}
   .snippet__label{order:1}
   .snippet__copy{order:1;margin-left:auto}
 }

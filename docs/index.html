@@ -178,10 +178,10 @@
 
         <div class="tools-toolbar">
           <div class="filter-group" role="tablist" aria-label="Filtrar tools">
-            <button class="filter-btn is-active" data-filter="all" role="tab" aria-selected="true">todas · 19</button>
-            <button class="filter-btn" data-filter="memory" role="tab" aria-selected="false">memória · 6</button>
-            <button class="filter-btn" data-filter="graph" role="tab" aria-selected="false">grafo · 10</button>
-            <button class="filter-btn" data-filter="system" role="tab" aria-selected="false">sistema · 3</button>
+            <button class="filter-btn" type="button" is-active" data-filter="all" role="tab" aria-selected="true">todas · 19</button>
+            <button class="filter-btn" type="button"" data-filter="memory" role="tab" aria-selected="false">memória · 6</button>
+            <button class="filter-btn" type="button"" data-filter="graph" role="tab" aria-selected="false">grafo · 10</button>
+            <button class="filter-btn" type="button"" data-filter="system" role="tab" aria-selected="false">sistema · 3</button>
           </div>
           <span class="tools-count" aria-live="polite"><span id="tools-count-num">19</span> tools</span>
         </div>
@@ -293,10 +293,10 @@
       let n=0;
       fiches.forEach(el=>{
         const show = f==='all' || el.dataset.cat===f;
-        el.hidden = !show; el.style.display = show ? '' : 'none';
+        el.hidden = !show;
         if(show) n++;
       });
-      countEl.textContent = n;
+      if(countEl) countEl.textContent = String(n);
     });
   });
   // Reveal on scroll + toc active
