@@ -48,11 +48,12 @@ __export(config_exports, {
   configuredDaemonUrl: () => configuredDaemonUrl,
   readConfig: () => readConfig,
   saveDaemonUrl: () => saveDaemonUrl,
-  validateDaemonUrl: () => validateDaemonUrl
+  validateDaemonUrl: () => validateDaemonUrl,
+  writeConfigPatch: () => writeConfigPatch
 });
-import { readFileSync as readFileSync3, writeFileSync, existsSync as existsSync3, mkdirSync, renameSync } from "node:fs";
-import { join as join3 } from "node:path";
-import { homedir as homedir2 } from "node:os";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from "node:fs";
+import { join } from "node:path";
+import { homedir } from "node:os";
 function validateDaemonUrl(input) {
   if (!input || input.trim().length === 0) {
     return { ok: false, error: "URL must not be empty" };
@@ -77,10 +78,10 @@ function validateDaemonUrl(input) {
   return { ok: true, url: normalized };
 }
 function readConfig(dir) {
-  const configPath = join3(dir ?? CONFIG_DIR, "config.json");
+  const configPath = join(dir ?? CONFIG_DIR, "config.json");
   try {
-    if (!existsSync3(configPath)) return {};
-    const raw = readFileSync3(configPath, "utf-8");
+    if (!existsSync(configPath)) return {};
+    const raw = readFileSync(configPath, "utf-8");
     return safeJsonParse(raw, {});
   } catch {
     return {};
@@ -95,28 +96,31 @@ function configuredDaemonUrl(env, readCfg) {
   }
   return null;
 }
-function saveDaemonUrl(url, dir) {
-  const v = validateDaemonUrl(url);
-  if (!v.ok) return { ok: false, error: v.error };
+function writeConfigPatch(dir, patch) {
   try {
-    const configDir = dir ?? CONFIG_DIR;
-    mkdirSync(configDir, { recursive: true });
-    const configPath = join3(configDir, "config.json");
-    const tmpPath = configPath + ".tmp";
-    const existing = readConfig(configDir);
-    const updated = { ...existing, daemonUrl: v.url };
+    mkdirSync(dir, { recursive: true });
+    const configPath = join(dir, "config.json");
+    const tmpPath = configPath + ".tmp." + process.pid;
+    const existing = readConfig(dir);
+    const updated = { ...existing, ...patch };
     writeFileSync(tmpPath, JSON.stringify(updated, null, 2));
     renameSync(tmpPath, configPath);
-    return { ok: true, url: v.url };
+    return { ok: true };
   } catch (e) {
     return { ok: false, error: String(e) };
   }
 }
+function saveDaemonUrl(url, dir) {
+  const v = validateDaemonUrl(url);
+  if (!v.ok) return { ok: false, error: v.error };
+  const patched = writeConfigPatch(dir ?? CONFIG_DIR, { daemonUrl: v.url });
+  return patched.ok ? { ok: true, url: v.url } : { ok: false, error: patched.error };
+}
 function clearDaemonUrl(dir) {
   try {
     const configDir = dir ?? CONFIG_DIR;
-    const configPath = join3(configDir, "config.json");
-    if (!existsSync3(configPath)) return { ok: true };
+    const configPath = join(configDir, "config.json");
+    if (!existsSync(configPath)) return { ok: true };
     const existing = readConfig(configDir);
     const { daemonUrl: _, ...rest } = existing;
     const tmpPath = configPath + ".tmp";
@@ -132,30 +136,26 @@ var init_config = __esm({
   "src/config.ts"() {
     "use strict";
     init_contracts();
-    CONFIG_DIR = join3(homedir2(), ".opencode-memory");
+    CONFIG_DIR = join(homedir(), ".opencode-memory");
     ENV_KEY = "OPENCODE_MEMORY_DAEMON_URL";
   }
 });
 
-// src/index.ts
-import { tool } from "@opencode-ai/plugin/tool";
-
 // src/daemon.ts
-init_contracts();
-import { readFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
-import { homedir } from "node:os";
+import { readFileSync as readFileSync2, existsSync as existsSync2 } from "node:fs";
+import { join as join2 } from "node:path";
+import { homedir as homedir2 } from "node:os";
 function resolveRunDir() {
   const override = process.env.MCP_RUN_DIR;
-  if (override) return join(override, "run");
-  return join(homedir(), ".mcp-memory", "run");
+  if (override) return join2(override, "run");
+  return join2(homedir2(), ".mcp-memory", "run");
 }
 function readRegistry(runDir) {
   const dir = runDir ?? resolveRunDir();
-  const filePath = join(dir, "daemon.json");
+  const filePath = join2(dir, "daemon.json");
   try {
-    if (!existsSync(filePath)) return null;
-    const raw = readFileSync(filePath, "utf-8");
+    if (!existsSync2(filePath)) return null;
+    const raw = readFileSync2(filePath, "utf-8");
     const parsed = safeJsonParse(raw, null);
     if (!parsed || typeof parsed.url !== "string") return null;
     const source = parsed.source === "registry" ? "registry" : "configured";
@@ -191,7 +191,8 @@ async function health(url, timeoutMs) {
 }
 async function resolveDaemon(opts) {
   const env = opts?._env ?? process.env;
-  const configuredUrl = env.OPENCODE_MEMORY_DAEMON_URL ?? opts?._readConfig?.()?.daemonUrl ?? null;
+  const readCfg = opts?._readConfig ?? (() => readConfig());
+  const configuredUrl = env.OPENCODE_MEMORY_DAEMON_URL ?? readCfg()?.daemonUrl ?? null;
   const healthFn = opts?._health ?? health;
   if (configuredUrl) {
     const h = await healthFn(configuredUrl, 3e3);
@@ -219,6 +220,306 @@ async function discover() {
   const result = await resolveDaemon();
   return result.info;
 }
+var init_daemon = __esm({
+  "src/daemon.ts"() {
+    "use strict";
+    init_contracts();
+    init_config();
+  }
+});
+
+// src/provision.ts
+var provision_exports = {};
+__export(provision_exports, {
+  acquireLock: () => acquireLock,
+  ensureServer: () => ensureServer,
+  fetchLatestServerRelease: () => fetchLatestServerRelease,
+  lockPath: () => lockPath,
+  releaseLock: () => releaseLock,
+  resolveJava: () => resolveJava,
+  serverDir: () => serverDir,
+  spawnDaemon: () => spawnDaemon,
+  verifySha256: () => verifySha256
+});
+import { existsSync as existsSync4, readFileSync as readFileSync4, rmSync, writeFileSync as writeFileSync2, unlinkSync } from "node:fs";
+import { join as join4 } from "node:path";
+import { homedir as homedir3 } from "node:os";
+import { spawn } from "node:child_process";
+function serverDir() {
+  return join4(homedir3(), ".opencode-memory", "server");
+}
+function parseVersion(tag) {
+  const m = tag.match(/^v(\d+)\.(\d+)\.(\d+)$/);
+  if (!m) return null;
+  return [parseInt(m[1], 10), parseInt(m[2], 10), parseInt(m[3], 10)];
+}
+function versionGte(a, b) {
+  if (a[0] !== b[0]) return a[0] > b[0];
+  if (a[1] !== b[1]) return a[1] > b[1];
+  return a[2] >= b[2];
+}
+function isWindows() {
+  return process.platform === "win32";
+}
+function javaBinary() {
+  return isWindows() ? "java.exe" : "java";
+}
+async function fetchLatestServerRelease(opts) {
+  try {
+    const fetchFn = opts?._fetch ?? globalThis.fetch;
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), opts?._timeoutMs ?? 15e3);
+    let resp;
+    try {
+      resp = await fetchFn(RELEASES_API, { signal: ac.signal });
+    } finally {
+      clearTimeout(timer);
+    }
+    const raw = await resp.json();
+    let best = null;
+    for (const r of raw) {
+      if (r.draft || r.prerelease) continue;
+      const ver = parseVersion(r.tag_name);
+      if (!ver) continue;
+      if (!versionGte(ver, MIN_VERSION)) continue;
+      const jarAssets = r.assets.filter((a) => /^mcp-memory-server-.*\.jar$/.test(a.name));
+      if (jarAssets.length === 0) continue;
+      const plainJar = jarAssets.find((a) => !a.name.includes("-gpu")) ?? jarAssets[0];
+      const sha256Name = plainJar.name + ".sha256";
+      const sha256Asset = r.assets.find((a) => a.name === sha256Name);
+      const release = {
+        version: ver,
+        tag: r.tag_name,
+        jarUrl: plainJar.browser_download_url,
+        jarName: plainJar.name,
+        sha256Url: sha256Asset?.browser_download_url ?? null
+      };
+      if (!best || versionGte(ver, best.version)) {
+        best = release;
+      }
+    }
+    return best;
+  } catch {
+    return null;
+  }
+}
+async function resolveJava(opts) {
+  const existsFn = opts._existsSync ?? existsSync4;
+  const env = opts._env ?? process.env;
+  const whichFn = opts._which ?? (async (cmd) => {
+    try {
+      const { execFileSync: execFileSync2 } = await import("node:child_process");
+      const result = execFileSync2(isWindows() ? "where" : "which", [cmd], {
+        timeout: 5e3,
+        stdio: ["pipe", "pipe", "pipe"]
+      }).toString().trim();
+      return result || null;
+    } catch {
+      return null;
+    }
+  });
+  const bundled = join4(opts.serverDir, "runtime", "bin", javaBinary());
+  if (existsFn(bundled)) return bundled;
+  if (existsFn(bundled + ".exe")) return bundled + ".exe";
+  const javaHome = env.JAVA_HOME;
+  if (javaHome) {
+    const homeBin = join4(javaHome, "bin", javaBinary());
+    if (existsFn(homeBin)) return homeBin;
+    if (existsFn(homeBin + ".exe")) return homeBin + ".exe";
+  }
+  const fromPath = await whichFn("java");
+  if (fromPath) return fromPath;
+  return null;
+}
+function lockPath(dir) {
+  return join4(dir, ".provisioning.lock");
+}
+async function acquireLock(dir, opts) {
+  const lp = lockPath(dir);
+  const timeout = opts?.timeoutMs ?? 6e4;
+  try {
+    if (existsSync4(lp)) {
+      const raw = readFileSync4(lp, "utf-8");
+      const parsed = JSON.parse(raw);
+      if (parsed.ts && Date.now() - parsed.ts < LOCK_TTL_MS) {
+        const start = Date.now();
+        while (Date.now() - start < timeout) {
+          await new Promise((r) => setTimeout(r, 500));
+          if (!existsSync4(lp)) break;
+          const re = JSON.parse(readFileSync4(lp, "utf-8"));
+          if (re.ts && Date.now() - re.ts >= LOCK_TTL_MS) break;
+        }
+        if (existsSync4(lp)) {
+          const re = JSON.parse(readFileSync4(lp, "utf-8"));
+          if (re.ts && Date.now() - re.ts < LOCK_TTL_MS) return false;
+        }
+      }
+    }
+    writeFileSync2(lp, JSON.stringify({ pid: process.pid, ts: Date.now() }));
+    return true;
+  } catch {
+    return true;
+  }
+}
+function releaseLock(dir) {
+  try {
+    const lp = lockPath(dir);
+    if (existsSync4(lp)) unlinkSync(lp);
+  } catch {
+  }
+}
+async function downloadJar(url, dest, opts) {
+  try {
+    const fetchFn = opts?._fetch ?? globalThis.fetch;
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), opts?._timeoutMs ?? 12e4);
+    let resp;
+    try {
+      resp = await fetchFn(url, { signal: ac.signal });
+    } finally {
+      clearTimeout(timer);
+    }
+    if (!resp.ok) return false;
+    const buf = Buffer.from(await resp.arrayBuffer());
+    const { writeFileSync: ws } = await import("node:fs");
+    ws(dest, buf);
+    return true;
+  } catch {
+    return false;
+  }
+}
+async function verifySha256(jarPath, sha256Url, opts) {
+  try {
+    const fetchFn = opts?._fetch ?? globalThis.fetch;
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), opts?._timeoutMs ?? 3e4);
+    let resp;
+    try {
+      resp = await fetchFn(sha256Url, { signal: ac.signal });
+    } finally {
+      clearTimeout(timer);
+    }
+    if (!resp.ok) return false;
+    const expected = (await resp.text()).trim().split(/\s+/)[0]?.toLowerCase();
+    if (!expected || expected.length !== 64) return false;
+    const { readFileSync: rs } = await import("node:fs");
+    const { createHash } = await import("node:crypto");
+    const buf = rs(jarPath);
+    const actual = createHash("sha256").update(buf).digest("hex");
+    return actual === expected;
+  } catch {
+    return false;
+  }
+}
+function spawnDaemon(javaPath, jarPath, opts) {
+  const spawnFn = opts?._spawn ?? spawn;
+  try {
+    const child = spawnFn(
+      javaPath,
+      ["--enable-native-access=ALL-UNNAMED", "-jar", jarPath, "--transport", "http", "--daemon"],
+      {
+        detached: true,
+        stdio: "ignore",
+        windowsHide: true
+      }
+    );
+    child.unref();
+  } catch {
+  }
+}
+async function waitForAnnounce(discoverFn, pollMs, timeoutMs) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const info = await discoverFn();
+    if (info) return true;
+    await new Promise((r) => setTimeout(r, pollMs));
+  }
+  return false;
+}
+async function ensureServer(opts) {
+  const sDir = opts?._serverDir ?? serverDir();
+  const discoverFn = opts?._discover ?? discover;
+  const acquireFn = opts?._acquireLock ?? ((d) => acquireLock(d));
+  const releaseFn = opts?._releaseLock ?? releaseLock;
+  try {
+    const existing = await discoverFn();
+    if (existing) {
+      return { ok: true, reused: true, version: null };
+    }
+    const autoEnabled = opts?._autoProvisionEnabled ?? (() => true);
+    if (!autoEnabled()) {
+      return { ok: false, reason: "disabled" };
+    }
+    const acquired = await acquireFn(sDir);
+    if (!acquired) {
+      const waitFn = opts?._waitForAnnounce ?? (() => waitForAnnounce(discoverFn, PROVISION_POLL_INTERVAL_MS, 6e4));
+      const waited = await waitFn();
+      if (waited) return { ok: true, reused: true, pending: true };
+      return { ok: false, reason: "lock-timeout" };
+    }
+    try {
+      const resolveJavaFn = opts?._resolveJava ?? ((d) => resolveJava({ serverDir: d }));
+      const java = await resolveJavaFn(sDir);
+      if (!java) {
+        return { ok: false, reason: "no-java" };
+      }
+      const fetchReleaseFn = opts?._fetchLatestRelease ?? (() => fetchLatestServerRelease());
+      const release = await fetchReleaseFn();
+      if (!release) {
+        return { ok: false, reason: "no-release" };
+      }
+      const jarPath = join4(sDir, release.jarName);
+      if (!existsSync4(jarPath)) {
+        const dlFn = opts?._downloadJar ?? ((url, dest) => downloadJar(url, dest));
+        const downloaded = await dlFn(release.jarUrl, jarPath);
+        if (!downloaded) {
+          return { ok: false, reason: "download-failed" };
+        }
+      }
+      if (release.sha256Url) {
+        const verifyFn = opts?._verifySha256 ?? ((jar, url) => verifySha256(jar, url));
+        const valid = await verifyFn(jarPath, release.sha256Url);
+        if (!valid) {
+          try {
+            rmSync(jarPath);
+          } catch {
+          }
+          return { ok: false, reason: "sha256-mismatch" };
+        }
+      }
+      const spawnFn = opts?._spawnDaemon ?? ((j, jar) => spawnDaemon(j, jar));
+      spawnFn(java, jarPath);
+      const waitFn = opts?._waitForAnnounce ?? (() => waitForAnnounce(discoverFn, PROVISION_POLL_INTERVAL_MS, PROVISION_POLL_TIMEOUT_MS));
+      const announced = await waitFn();
+      return {
+        ok: announced,
+        installed: announced,
+        version: release.version.join("."),
+        ...announced ? {} : { reason: "spawn-timeout" }
+      };
+    } finally {
+      releaseFn(sDir);
+    }
+  } catch {
+    return { ok: false, reason: "error" };
+  }
+}
+var RELEASES_API, MIN_VERSION, LOCK_TTL_MS, PROVISION_POLL_INTERVAL_MS, PROVISION_POLL_TIMEOUT_MS;
+var init_provision = __esm({
+  "src/provision.ts"() {
+    "use strict";
+    init_daemon();
+    RELEASES_API = "https://api.github.com/repos/AllanSantos-DV/mcp-memory-server-releases/releases?per_page=30";
+    MIN_VERSION = [2, 19, 0];
+    LOCK_TTL_MS = 6e5;
+    PROVISION_POLL_INTERVAL_MS = 2e3;
+    PROVISION_POLL_TIMEOUT_MS = 9e4;
+  }
+});
+
+// src/index.ts
+init_daemon();
+import { tool } from "@opencode-ai/plugin/tool";
 
 // src/errors.ts
 var GraphError = class extends Error {
@@ -595,8 +896,8 @@ function explainError(e) {
 // src/projectId.ts
 init_contracts();
 import { execFileSync } from "node:child_process";
-import { existsSync as existsSync2, readFileSync as readFileSync2 } from "node:fs";
-import { join as join2, isAbsolute } from "node:path";
+import { existsSync as existsSync3, readFileSync as readFileSync3 } from "node:fs";
+import { join as join3, isAbsolute } from "node:path";
 function normalizeGitRemote(remoteUrl) {
   if (!remoteUrl) return null;
   let url = remoteUrl.trim();
@@ -633,16 +934,16 @@ function gitRepoBase(workspacePath) {
 function findProjectRoot(workspacePath) {
   let dir = workspacePath;
   for (let i = 0; i < 20; i++) {
-    const candidate = join2(dir, ".memory", "project.json");
-    if (existsSync2(candidate)) return dir;
-    const parent = join2(dir, "..");
+    const candidate = join3(dir, ".memory", "project.json");
+    if (existsSync3(candidate)) return dir;
+    const parent = join3(dir, "..");
     if (parent === dir) break;
     dir = parent;
   }
   const toplevel = gitRepoBase(workspacePath);
   if (toplevel) {
-    const candidate = join2(toplevel, ".memory", "project.json");
-    if (existsSync2(candidate)) return toplevel;
+    const candidate = join3(toplevel, ".memory", "project.json");
+    if (existsSync3(candidate)) return toplevel;
   }
   return null;
 }
@@ -659,7 +960,7 @@ function readDeclaredProjectId(workspacePath) {
   const root = findProjectRoot(workspacePath);
   if (!root) return null;
   try {
-    const raw = readFileSync2(join2(root, ".memory", "project.json"), "utf-8");
+    const raw = readFileSync3(join3(root, ".memory", "project.json"), "utf-8");
     const data = safeJsonParse(raw, null);
     if (!data) return null;
     const pid = data.metadata ? data.metadata.project_id : data.project_id;
@@ -1431,18 +1732,19 @@ async function tagOnMiss(client, root, opts) {
 // src/dashboard.ts
 init_contracts();
 import { createServer } from "node:http";
-import { readFileSync as readFileSync4, writeFileSync as writeFileSync2, existsSync as existsSync4, mkdirSync as mkdirSync2, renameSync as renameSync2, unlinkSync } from "node:fs";
-import { join as join4 } from "node:path";
-import { homedir as homedir3 } from "node:os";
+import { readFileSync as readFileSync5, writeFileSync as writeFileSync3, existsSync as existsSync5, mkdirSync as mkdirSync2, renameSync as renameSync2, unlinkSync as unlinkSync2 } from "node:fs";
+import { join as join5 } from "node:path";
+import { homedir as homedir4 } from "node:os";
+init_daemon();
 init_config();
 function portFilePath(dir) {
-  return join4(dir, "dashboard-port.json");
+  return join5(dir, "dashboard-port.json");
 }
 function readPortFile(dir) {
   try {
     const p = portFilePath(dir);
-    if (!existsSync4(p)) return null;
-    const raw = readFileSync4(p, "utf-8");
+    if (!existsSync5(p)) return null;
+    const raw = readFileSync5(p, "utf-8");
     const data = safeJsonParse(raw, null);
     if (data && typeof data.port === "number" && data.port > 0) return data.port;
     return null;
@@ -1455,12 +1757,12 @@ function writePortFile(dir, port) {
     mkdirSync2(dir, { recursive: true });
     const file = portFilePath(dir);
     const tmp = `${file}.tmp.${process.pid}`;
-    writeFileSync2(tmp, JSON.stringify({ port }));
+    writeFileSync3(tmp, JSON.stringify({ port }));
     try {
       renameSync2(tmp, file);
     } catch (e) {
       try {
-        unlinkSync(tmp);
+        unlinkSync2(tmp);
       } catch {
       }
       throw e;
@@ -1534,6 +1836,22 @@ function spaHtml() {
 <body>
 <h1>OpenCode Memory Dashboard</h1>
 <div class="grid">
+  <div class="card" id="card-onboarding">
+    <h2>Server Setup</h2>
+    <div id="onb-status"><span class="empty">Loading...</span></div>
+    <div id="onb-java-hint" hidden>
+      <p class="empty">Java runtime not found. Install Temurin 21+:
+        <a href="https://adoptium.net" target="_blank" rel="noopener">adoptium.net</a></p>
+    </div>
+    <div id="onb-env-warning" hidden><span class="empty">OPENCODE_MEMORY_DAEMON_URL env var is overriding saved config.</span></div>
+    <div class="onb-modes">
+      <button data-mode="local" onclick="onboardingSetup('local')">Download &amp; run locally</button>
+      <button data-mode="remote" onclick="onboardingSetup('remote')">Point to running server</button>
+      <button data-mode="skip" onclick="onboardingSetup('skip')">Skip \u2014 I'll configure later</button>
+    </div>
+    <input type="text" id="onb-remote-url" placeholder="http://host:port (for remote mode)">
+    <div id="onb-result"></div>
+  </div>
   <div class="card" id="card-status">
     <h2>Server Status</h2>
     <div id="status-content"><span class="empty">Loading...</span></div>
@@ -1561,6 +1879,57 @@ function spaHtml() {
 <script>
 let busy = false;
 function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+async function loadOnboarding() {
+  try {
+    const r = await fetch('/api/onboarding/status');
+    if (!r.ok) return;
+    const s = await r.json();
+    renderOnboarding(s);
+  } catch(e) {}
+}
+function renderOnboarding(s) {
+  const el = document.getElementById('onb-status');
+  if (!el) return;
+  const state = s.hasDaemon
+    ? '<span class="pill online">Server online</span>'
+    : (s.urlSource === 'none' ? '<span class="pill offline">No server configured</span>' : '<span class="pill offline">Configured but unreachable</span>');
+  const src = s.urlSource === 'env' ? 'env var' : (s.urlSource === 'config' ? 'config.json' : 'none');
+  el.innerHTML = state +
+    '<div class="row"><span class="label">URL source</span><span>' + esc(src) + '</span></div>' +
+    (s.configuredUrl ? '<div class="row"><span class="label">URL</span><span>' + esc(s.configuredUrl) + '</span></div>' : '') +
+    '<div class="row"><span class="label">Java</span><span>' + (s.javaOk ? 'found' : 'missing') + '</span></div>';
+  const jh = document.getElementById('onb-java-hint');
+  if (jh) jh.hidden = !!s.javaOk;
+  const ew = document.getElementById('onb-env-warning');
+  if (ew) ew.hidden = s.urlSource !== 'env';
+  const remoteInput = document.getElementById('onb-remote-url');
+  if (remoteInput && s.configuredUrl && !remoteInput.value) remoteInput.value = s.configuredUrl;
+}
+async function onboardingSetup(mode) {
+  const resultEl = document.getElementById('onb-result');
+  const body = { mode };
+  if (mode === 'remote') {
+    body.url = document.getElementById('onb-remote-url').value.trim();
+    if (!body.url) { resultEl.innerHTML = '<span class="empty">Enter the server URL first.</span>'; return; }
+  }
+  if (resultEl) resultEl.innerHTML = '<span class="empty">Working... (download may take a while)</span>';
+  document.querySelectorAll('.onb-modes button').forEach(b => b.disabled = true);
+  try {
+    const r = await fetch('/api/onboarding/setup', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    const res = await r.json();
+    if (res.ok) {
+      const verified = res.verified === undefined ? '' : (res.verified ? ' \u2014 health check OK' : ' \u2014 WARNING: health check failed');
+      resultEl.innerHTML = '<span class="empty">Done: ' + esc(res.mode) + verified + '</span>';
+    } else {
+      resultEl.innerHTML = '<span class="empty">Failed: ' + esc(res.error || 'unknown error') + '</span>';
+    }
+  } catch(e) {
+    resultEl.innerHTML = '<span class="empty">Request failed: ' + esc(String(e)) + '</span>';
+  } finally {
+    document.querySelectorAll('.onb-modes button').forEach(b => b.disabled = false);
+    loadOnboarding();
+  }
+}
 async function load() {
   if (busy) return;
   busy = true;
@@ -1637,7 +2006,9 @@ async function doProvision() {
   load();
 }
 load();
+loadOnboarding();
 setInterval(() => { if (!busy) load(); }, 5000);
+setInterval(loadOnboarding, 15000);
 </script>
 </body>
 </html>`;
@@ -1649,6 +2020,9 @@ var MemoryDashboard = class {
   #configDir;
   #portDir;
   #resolveDaemonFn;
+  #javaCheckFn;
+  #healthProbeFn;
+  #healthVerifyFn;
   #server = null;
   #url = null;
   #clientCache = null;
@@ -1660,8 +2034,18 @@ var MemoryDashboard = class {
     this.#provisioner = opts?.provisioner ?? (() => Promise.resolve({ ok: false, reason: "no-provisioner" }));
     this.#clientFactory = opts?.clientFactory ?? ((u) => new MemoryClient(u));
     this.#configDir = opts?._configDir ?? CONFIG_DIR;
-    this.#portDir = opts?._portDir ?? join4(homedir3(), ".opencode-memory");
+    this.#portDir = opts?._portDir ?? join5(homedir4(), ".opencode-memory");
     this.#resolveDaemonFn = opts?._resolveDaemon ?? resolveDaemon;
+    this.#javaCheckFn = opts?._javaCheck ?? (async (dir) => {
+      try {
+        const { resolveJava: resolveJava2 } = await Promise.resolve().then(() => (init_provision(), provision_exports));
+        return await resolveJava2({ serverDir: dir });
+      } catch {
+        return null;
+      }
+    });
+    this.#healthProbeFn = opts?._healthProbe ?? (async (url) => ({ ok: await health(url, 5e3) }));
+    this.#healthVerifyFn = opts?._healthVerify ?? (async (url) => ({ ok: await health(url, 5e3) }));
   }
   #getClient(url) {
     if (!this.#clientCache || this.#clientUrl !== url) {
@@ -1714,7 +2098,7 @@ var MemoryDashboard = class {
         strength,
         fragile,
         hasConfig: !!config.daemonUrl,
-        configPath: join4(this.#configDir, "config.json"),
+        configPath: join5(this.#configDir, "config.json"),
         workdir: cwd
       },
       recent: [],
@@ -1803,6 +2187,127 @@ var MemoryDashboard = class {
     if (!v.ok) return { ok: false, error: v.error };
     const { saveDaemonUrl: saveDaemonUrl2 } = await Promise.resolve().then(() => (init_config(), config_exports));
     return saveDaemonUrl2(url, this.#configDir);
+  }
+  async #javaOk() {
+    try {
+      const { serverDir: serverDir2 } = await Promise.resolve().then(() => (init_provision(), provision_exports));
+      return await this.#javaCheckFn(serverDir2()) !== null;
+    } catch {
+      return false;
+    }
+  }
+  async onboardingStatus() {
+    const config = readConfig(this.#configDir);
+    let result = {
+      info: null,
+      source: "none",
+      configuredUrl: null
+    };
+    try {
+      result = await this.#resolveDaemonFn();
+    } catch {
+    }
+    const urlSource = process.env.OPENCODE_MEMORY_DAEMON_URL ? "env" : config.daemonUrl ? "config" : "none";
+    const javaOk = await this.#javaOk();
+    const jarInstalled = existsSync5(join5(this.#configDir, "server"));
+    return {
+      hasDaemon: result.info !== null,
+      reachable: result.info !== null,
+      urlSource,
+      configuredUrl: result.configuredUrl ?? config.daemonUrl ?? null,
+      javaOk,
+      jarInstalled,
+      onboarded: config.onboarded === true,
+      actions: !result.info && result.source === "configured-unreachable" ? ["retest", "replace-url", "clear-url"] : []
+    };
+  }
+  async onboardingSetup(input) {
+    const mode = input?.mode;
+    if (mode !== "local" && mode !== "remote" && mode !== "skip") {
+      return { ok: false, mode: String(mode ?? ""), error: `invalid mode: ${String(mode)}` };
+    }
+    if (mode === "skip") {
+      const { writeConfigPatch: writeConfigPatch2 } = await Promise.resolve().then(() => (init_config(), config_exports));
+      const written = writeConfigPatch2(this.#configDir, { onboarded: true });
+      if (!written.ok) {
+        return { ok: false, mode, error: `failed to persist onboarded flag: ${written.error}` };
+      }
+      return { ok: true, mode };
+    }
+    if (mode === "remote") {
+      const url = input.url;
+      if (!url || typeof url !== "string") {
+        return { ok: false, mode, error: "url is required for remote setup" };
+      }
+      const v = validateDaemonUrl(url);
+      if (!v.ok) return { ok: false, mode, error: v.error };
+      let probe;
+      try {
+        probe = await this.#healthProbeFn(v.url);
+      } catch (e) {
+        return { ok: false, mode, error: `health check failed: ${String(e)}` };
+      }
+      if (!probe.ok) {
+        return { ok: false, mode, error: `server unreachable at ${v.url} (/health failed)` };
+      }
+      const { saveDaemonUrl: saveDaemonUrl2 } = await Promise.resolve().then(() => (init_config(), config_exports));
+      const saved = saveDaemonUrl2(v.url, this.#configDir);
+      if (!saved.ok) return { ok: false, mode, error: saved.error };
+      let verify;
+      try {
+        verify = await this.#healthVerifyFn(saved.url);
+      } catch (e) {
+        return { ok: false, mode, daemonUrl: saved.url, error: `verify failed: ${String(e)}` };
+      }
+      return {
+        ok: true,
+        mode,
+        verified: verify.ok,
+        daemonUrl: saved.url,
+        ...verify.ok ? {} : { error: "saved but /health did not confirm after save" }
+      };
+    }
+    let prov;
+    try {
+      prov = await this.provision();
+    } catch (e) {
+      return { ok: false, mode, error: `provision threw: ${String(e)}` };
+    }
+    if (!prov.ok) {
+      return {
+        ok: false,
+        mode,
+        error: `provision failed: ${prov.reason ?? "unknown"}`
+      };
+    }
+    try {
+      const result = await this.#resolveDaemonFn();
+      if (!result.info) {
+        return { ok: false, mode, error: "provision reported ok but daemon not discoverable" };
+      }
+      const verify = await this.#healthVerifyFn(result.info.url);
+      return {
+        ok: true,
+        mode,
+        verified: verify.ok,
+        daemonUrl: result.info.url,
+        ...verify.ok ? {} : { error: "daemon discovered but /health did not confirm" }
+      };
+    } catch (e) {
+      return { ok: false, mode, error: `verify failed: ${String(e)}` };
+    }
+  }
+  async stop() {
+    const server = this.#server;
+    this.#server = null;
+    if (!server) return;
+    await new Promise((resolve) => {
+      try {
+        server.close(() => resolve());
+      } catch {
+        resolve();
+      }
+    });
   }
   async startServer() {
     if (this.#server) return await this.ensureServer();
@@ -1907,39 +2412,7 @@ var MemoryDashboard = class {
       return;
     }
     if (url === "/api/config" && method === "POST") {
-      const MAX_BODY = 65536;
-      const REQUEST_TIMEOUT_MS = 1e4;
-      const contentLength = parseInt(req.headers["content-length"] ?? "0", 10);
-      if (contentLength > MAX_BODY) {
-        res.writeHead(413, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ ok: false, error: "Payload too large" }));
-        return;
-      }
-      let body = "";
-      let timedOut = false;
-      const timer = setTimeout(() => {
-        timedOut = true;
-        req.destroy();
-      }, REQUEST_TIMEOUT_MS);
-      req.on("data", (chunk) => {
-        if (timedOut) return;
-        body += chunk.toString();
-      });
-      req.on("error", () => {
-        clearTimeout(timer);
-      });
-      req.on("end", async () => {
-        clearTimeout(timer);
-        try {
-          const parsed = safeJsonParse(body, {});
-          const result = await this.saveServerConfig(parsed.url);
-          res.writeHead(200, { "Content-Type": "application/json" });
-          res.end(JSON.stringify(result));
-        } catch {
-          res.writeHead(200, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ ok: false, error: "parse error" }));
-        }
-      });
+      this.#readJsonBody(req, res, async (parsed) => this.saveServerConfig(parsed.url));
       return;
     }
     if (url === "/api/config" && method === "DELETE") {
@@ -1948,295 +2421,123 @@ var MemoryDashboard = class {
       res.end(JSON.stringify(result));
       return;
     }
+    if (url === "/api/onboarding/status" && method === "GET") {
+      const status = await this.onboardingStatus();
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(status));
+      return;
+    }
+    if (url === "/api/onboarding/setup" && method === "POST") {
+      this.#readJsonBody(req, res, async (parsed) => this.onboardingSetup(parsed), {
+        timeoutMs: 12e4
+        // local mode: client may stream a large body slowly — handler runs after
+      });
+      return;
+    }
     res.writeHead(404);
     res.end("Not Found");
   }
+  #readJsonBody(req, res, handler, opts) {
+    const MAX_BODY = opts?.maxBody ?? 65536;
+    const REQUEST_TIMEOUT_MS = opts?.timeoutMs ?? 1e4;
+    const contentLength = parseInt(req.headers["content-length"] ?? "0", 10);
+    if (contentLength > MAX_BODY) {
+      res.writeHead(413, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "Payload too large" }));
+      return;
+    }
+    let body = "";
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      req.destroy();
+    }, REQUEST_TIMEOUT_MS);
+    req.on("data", (chunk) => {
+      if (timedOut) return;
+      body += chunk.toString();
+    });
+    req.on("error", () => {
+      clearTimeout(timer);
+    });
+    req.on("end", async () => {
+      clearTimeout(timer);
+      try {
+        const parsed = safeJsonParse(body, {});
+        const result = await handler(parsed);
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(result));
+      } catch {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: "parse error" }));
+      }
+    });
+  }
 };
 
-// src/provision.ts
-import { existsSync as existsSync5, readFileSync as readFileSync5, rmSync, writeFileSync as writeFileSync3, unlinkSync as unlinkSync2 } from "node:fs";
-import { join as join5 } from "node:path";
-import { homedir as homedir4 } from "node:os";
-import { spawn } from "node:child_process";
-var RELEASES_API = "https://api.github.com/repos/AllanSantos-DV/mcp-memory-server-releases/releases?per_page=30";
-var MIN_VERSION = [2, 19, 0];
-var LOCK_TTL_MS = 6e5;
-var PROVISION_POLL_INTERVAL_MS = 2e3;
-var PROVISION_POLL_TIMEOUT_MS = 9e4;
-function serverDir() {
-  return join5(homedir4(), ".opencode-memory", "server");
-}
-function parseVersion(tag) {
-  const m = tag.match(/^v(\d+)\.(\d+)\.(\d+)$/);
-  if (!m) return null;
-  return [parseInt(m[1], 10), parseInt(m[2], 10), parseInt(m[3], 10)];
-}
-function versionGte(a, b) {
-  if (a[0] !== b[0]) return a[0] > b[0];
-  if (a[1] !== b[1]) return a[1] > b[1];
-  return a[2] >= b[2];
-}
-function isWindows() {
-  return process.platform === "win32";
-}
-function javaBinary() {
-  return isWindows() ? "java.exe" : "java";
-}
-async function fetchLatestServerRelease(opts) {
-  try {
-    const fetchFn = opts?._fetch ?? globalThis.fetch;
-    const ac = new AbortController();
-    const timer = setTimeout(() => ac.abort(), opts?._timeoutMs ?? 15e3);
-    let resp;
-    try {
-      resp = await fetchFn(RELEASES_API, { signal: ac.signal });
-    } finally {
-      clearTimeout(timer);
+// src/onboarding-text.ts
+function renderSetupMenu(status) {
+  const lines = [];
+  lines.push("memory-setup: server configuration wizard");
+  lines.push("");
+  if (status.hasDaemon) {
+    lines.push(`State: server ONLINE${status.configuredUrl ? ` at ${status.configuredUrl}` : ""}`);
+    if (status.urlSource === "env") {
+      lines.push("WARNING: OPENCODE_MEMORY_DAEMON_URL env var is overriding saved config.");
+      lines.push("Remove it if you want config.json to take effect.");
     }
-    const raw = await resp.json();
-    let best = null;
-    for (const r of raw) {
-      if (r.draft || r.prerelease) continue;
-      const ver = parseVersion(r.tag_name);
-      if (!ver) continue;
-      if (!versionGte(ver, MIN_VERSION)) continue;
-      const jarAssets = r.assets.filter((a) => /^mcp-memory-server-.*\.jar$/.test(a.name));
-      if (jarAssets.length === 0) continue;
-      const plainJar = jarAssets.find((a) => !a.name.includes("-gpu")) ?? jarAssets[0];
-      const sha256Name = plainJar.name + ".sha256";
-      const sha256Asset = r.assets.find((a) => a.name === sha256Name);
-      const release = {
-        version: ver,
-        tag: r.tag_name,
-        jarUrl: plainJar.browser_download_url,
-        jarName: plainJar.name,
-        sha256Url: sha256Asset?.browser_download_url ?? null
-      };
-      if (!best || versionGte(ver, best.version)) {
-        best = release;
-      }
+    if (status.onboarded) lines.push("Setup previously completed (onboarded).");
+  } else if (status.urlSource === "none") {
+    lines.push("State: No server configured \u2014 plugin tools are inactive until you set one up.");
+  } else {
+    lines.push(`State: configured but UNREACHABLE (${status.configuredUrl}).`);
+    if (status.actions.length > 0) {
+      lines.push(`Repair options: ${status.actions.join(", ")}.`);
     }
-    return best;
-  } catch {
-    return null;
   }
+  lines.push("");
+  lines.push(status.javaOk ? "Java runtime: found" : "Java runtime: MISSING \u2014 install Temurin 21+ from https://adoptium.net before local setup");
+  lines.push("");
+  lines.push("Choose a mode and call again:");
+  lines.push('  memory_setup("local")              \u2014 download JAR, start daemon locally, health-check');
+  lines.push('  memory_setup("remote", url)        \u2014 point to an already-running server, health-check');
+  lines.push('  memory_setup("skip")               \u2014 skip onboarding for now');
+  return lines.join("\n");
 }
-async function resolveJava(opts) {
-  const existsFn = opts._existsSync ?? existsSync5;
-  const env = opts._env ?? process.env;
-  const whichFn = opts._which ?? (async (cmd) => {
-    try {
-      const { execFileSync: execFileSync2 } = await import("node:child_process");
-      const result = execFileSync2(isWindows() ? "where" : "which", [cmd], {
-        timeout: 5e3,
-        stdio: ["pipe", "pipe", "pipe"]
-      }).toString().trim();
-      return result || null;
-    } catch {
-      return null;
-    }
-  });
-  const bundled = join5(opts.serverDir, "runtime", "bin", javaBinary());
-  if (existsFn(bundled)) return bundled;
-  if (existsFn(bundled + ".exe")) return bundled + ".exe";
-  const javaHome = env.JAVA_HOME;
-  if (javaHome) {
-    const homeBin = join5(javaHome, "bin", javaBinary());
-    if (existsFn(homeBin)) return homeBin;
-    if (existsFn(homeBin + ".exe")) return homeBin + ".exe";
+function renderSetupResult(result) {
+  if (!result.ok) {
+    return `memory-setup FAILED (mode=${result.mode}): ${result.error ?? "unknown error"}`;
   }
-  const fromPath = await whichFn("java");
-  if (fromPath) return fromPath;
-  return null;
+  const parts = [`mode=${result.mode}`];
+  if (result.daemonUrl) parts.push(`server=${result.daemonUrl}`);
+  if (result.verified === true) parts.push("health check OK");
+  else if (result.verified === false) parts.push(`WARNING: /health did NOT confirm \u2014 ${result.error ?? "unverified"}`);
+  if (result.mode === "skip") parts.push("no server touched; call memory_setup with no args anytime to configure");
+  return `memory-setup ok: ${parts.join("; ")}`;
 }
-function lockPath(dir) {
-  return join5(dir, ".provisioning.lock");
-}
-async function acquireLock(dir, opts) {
-  const lp = lockPath(dir);
-  const timeout = opts?.timeoutMs ?? 6e4;
-  try {
-    if (existsSync5(lp)) {
-      const raw = readFileSync5(lp, "utf-8");
-      const parsed = JSON.parse(raw);
-      if (parsed.ts && Date.now() - parsed.ts < LOCK_TTL_MS) {
-        const start = Date.now();
-        while (Date.now() - start < timeout) {
-          await new Promise((r) => setTimeout(r, 500));
-          if (!existsSync5(lp)) break;
-          const re = JSON.parse(readFileSync5(lp, "utf-8"));
-          if (re.ts && Date.now() - re.ts >= LOCK_TTL_MS) break;
-        }
-        if (existsSync5(lp)) {
-          const re = JSON.parse(readFileSync5(lp, "utf-8"));
-          if (re.ts && Date.now() - re.ts < LOCK_TTL_MS) return false;
-        }
-      }
-    }
-    writeFileSync3(lp, JSON.stringify({ pid: process.pid, ts: Date.now() }));
-    return true;
-  } catch {
-    return true;
-  }
-}
-function releaseLock(dir) {
-  try {
-    const lp = lockPath(dir);
-    if (existsSync5(lp)) unlinkSync2(lp);
-  } catch {
-  }
-}
-async function downloadJar(url, dest, opts) {
-  try {
-    const fetchFn = opts?._fetch ?? globalThis.fetch;
-    const ac = new AbortController();
-    const timer = setTimeout(() => ac.abort(), opts?._timeoutMs ?? 12e4);
-    let resp;
-    try {
-      resp = await fetchFn(url, { signal: ac.signal });
-    } finally {
-      clearTimeout(timer);
-    }
-    if (!resp.ok) return false;
-    const buf = Buffer.from(await resp.arrayBuffer());
-    const { writeFileSync: ws } = await import("node:fs");
-    ws(dest, buf);
-    return true;
-  } catch {
-    return false;
-  }
-}
-async function verifySha256(jarPath, sha256Url, opts) {
-  try {
-    const fetchFn = opts?._fetch ?? globalThis.fetch;
-    const ac = new AbortController();
-    const timer = setTimeout(() => ac.abort(), opts?._timeoutMs ?? 3e4);
-    let resp;
-    try {
-      resp = await fetchFn(sha256Url, { signal: ac.signal });
-    } finally {
-      clearTimeout(timer);
-    }
-    if (!resp.ok) return false;
-    const expected = (await resp.text()).trim().split(/\s+/)[0]?.toLowerCase();
-    if (!expected || expected.length !== 64) return false;
-    const { readFileSync: rs } = await import("node:fs");
-    const { createHash } = await import("node:crypto");
-    const buf = rs(jarPath);
-    const actual = createHash("sha256").update(buf).digest("hex");
-    return actual === expected;
-  } catch {
-    return false;
-  }
-}
-function spawnDaemon(javaPath, jarPath, opts) {
-  const spawnFn = opts?._spawn ?? spawn;
-  try {
-    const child = spawnFn(
-      javaPath,
-      ["--enable-native-access=ALL-UNNAMED", "-jar", jarPath, "--transport", "http", "--daemon"],
-      {
-        detached: true,
-        stdio: "ignore",
-        windowsHide: true
-      }
-    );
-    child.unref();
-  } catch {
-  }
-}
-async function waitForAnnounce(discoverFn, pollMs, timeoutMs) {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    const info = await discoverFn();
-    if (info) return true;
-    await new Promise((r) => setTimeout(r, pollMs));
-  }
-  return false;
-}
-async function ensureServer(opts) {
-  const sDir = opts?._serverDir ?? serverDir();
-  const discoverFn = opts?._discover ?? discover;
-  const acquireFn = opts?._acquireLock ?? ((d) => acquireLock(d));
-  const releaseFn = opts?._releaseLock ?? releaseLock;
-  try {
-    const existing = await discoverFn();
-    if (existing) {
-      return { ok: true, reused: true, version: null };
-    }
-    const autoEnabled = opts?._autoProvisionEnabled ?? (() => true);
-    if (!autoEnabled()) {
-      return { ok: false, reason: "disabled" };
-    }
-    const acquired = await acquireFn(sDir);
-    if (!acquired) {
-      const waitFn = opts?._waitForAnnounce ?? (() => waitForAnnounce(discoverFn, PROVISION_POLL_INTERVAL_MS, 6e4));
-      const waited = await waitFn();
-      if (waited) return { ok: true, reused: true, pending: true };
-      return { ok: false, reason: "lock-timeout" };
-    }
-    try {
-      const resolveJavaFn = opts?._resolveJava ?? ((d) => resolveJava({ serverDir: d }));
-      const java = await resolveJavaFn(sDir);
-      if (!java) {
-        return { ok: false, reason: "no-java" };
-      }
-      const fetchReleaseFn = opts?._fetchLatestRelease ?? (() => fetchLatestServerRelease());
-      const release = await fetchReleaseFn();
-      if (!release) {
-        return { ok: false, reason: "no-release" };
-      }
-      const jarPath = join5(sDir, release.jarName);
-      if (!existsSync5(jarPath)) {
-        const dlFn = opts?._downloadJar ?? ((url, dest) => downloadJar(url, dest));
-        const downloaded = await dlFn(release.jarUrl, jarPath);
-        if (!downloaded) {
-          return { ok: false, reason: "download-failed" };
-        }
-      }
-      if (release.sha256Url) {
-        const verifyFn = opts?._verifySha256 ?? ((jar, url) => verifySha256(jar, url));
-        const valid = await verifyFn(jarPath, release.sha256Url);
-        if (!valid) {
-          try {
-            rmSync(jarPath);
-          } catch {
-          }
-          return { ok: false, reason: "sha256-mismatch" };
-        }
-      }
-      const spawnFn = opts?._spawnDaemon ?? ((j, jar) => spawnDaemon(j, jar));
-      spawnFn(java, jarPath);
-      const waitFn = opts?._waitForAnnounce ?? (() => waitForAnnounce(discoverFn, PROVISION_POLL_INTERVAL_MS, PROVISION_POLL_TIMEOUT_MS));
-      const announced = await waitFn();
-      return {
-        ok: announced,
-        installed: announced,
-        version: release.version.join("."),
-        ...announced ? {} : { reason: "spawn-timeout" }
-      };
-    } finally {
-      releaseFn(sDir);
-    }
-  } catch {
-    return { ok: false, reason: "error" };
-  }
-}
+
+// src/index.ts
+init_provision();
+
+// src/serverGate.ts
+init_daemon();
 
 // src/serverAlert.ts
 function buildServerAlert(reason, url) {
   if (reason === "unreachable") {
     return [
       "\u{1F9E0} MEMORY SERVER UNREACHABLE \u2014 configured server `" + (url ?? "unknown") + "` did not respond.",
-      "Memory is temporarily unavailable. NOTIFY the user and open the panel",
-      "(tool `memory_dashboard`) to review/fix the URL."
+      "Memory is temporarily unavailable. NOTIFY the user, then FIX it via tool `memory_setup`",
+      '(no args = wizard; `memory_setup("remote", url)` to re-point) or open the visual panel',
+      "(`memory_dashboard`) \u2014 Server Setup card offers re-test / replace URL / clear."
     ].join("\n");
   }
   return [
     "\u{1F9E0} MEMORY DISABLED \u2014 no memory server configured or running.",
-    "Memory is NOT saving or injecting recall. NOTIFY the user and open the",
-    "panel (tool `memory_dashboard`) where they can POINT to an existing",
-    "server OR authorize provisioning a local one."
+    "Memory is NOT saving or injecting recall. NOTIFY the user and offer ONE of:",
+    '1. `memory_setup("local")` \u2014 download the server JAR and run it locally;',
+    '2. `memory_setup("remote", "http://host:port")` \u2014 point to a server already running (local LAN or remote);',
+    "3. skip for now. The visual panel (`memory_dashboard`) has the same 3 options in the Server Setup card.",
+    "Local and remote modes end with an automatic health check before memory becomes active."
   ].join("\n");
 }
 
@@ -3021,17 +3322,39 @@ var OpenCodeMemory = async (ctx, options) => {
         }
       }),
       memory_setup: tool({
-        description: "Download and start the local memory server (opt-in, one-time setup).",
-        args: {},
-        execute: async () => {
+        description: 'Server setup wizard \u2014 no args returns the 3 options + current status; modes: "local" (download & start daemon), "remote" with url (point to running server), "skip".',
+        args: {
+          mode: z.enum(["local", "remote", "skip"]).optional(),
+          url: z.string().optional()
+        },
+        execute: async (args) => {
           try {
-            const result = await ensureServer();
+            if (!dashboard) {
+              dashboard = new MemoryDashboard({
+                cwdProvider: () => workdir,
+                provisioner: () => ensureServer()
+              });
+            }
+            if (!args.mode) {
+              const status = await dashboard.onboardingStatus();
+              return JSON.stringify({
+                title: "memory-setup",
+                output: renderSetupMenu(status)
+              });
+            }
+            const result = await dashboard.onboardingSetup({
+              mode: args.mode,
+              ...args.url !== void 0 ? { url: args.url } : {}
+            });
             return JSON.stringify({
               title: result.ok ? "memory-setup: ok" : "memory-setup: failed",
-              output: result.ok ? `Server ${result.reused ? "already running" : "installed and running"} (v${result.version || "?"})` : `Failed: ${result.reason}`
+              output: renderSetupResult(result)
             });
-          } catch {
-            return JSON.stringify({ title: "memory-setup: failed", output: "Setup failed unexpectedly" });
+          } catch (e) {
+            return JSON.stringify({
+              title: "memory-setup: failed",
+              output: `Setup failed unexpectedly: ${String(e)}`
+            });
           }
         }
       }),

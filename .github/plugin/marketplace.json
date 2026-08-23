@@ -11,7 +11,7 @@
     {
       "name": "memory",
       "description": "Memória persistente entre sessões para o OpenCode - recall semântico, grafo de código, dashboard visual e curadoria automática",
-      "version": "0.1.6",
+      "version": "0.2.0",
       "source": "./plugins/memory",
       "author": {
         "name": "Allan Santos"
