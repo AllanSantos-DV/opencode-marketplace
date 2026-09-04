@@ -9,6 +9,9 @@ var __export = (target, all) => {
 };
 
 // src/contracts.ts
+function buildUpdateHint(latest, installed) {
+  return `[memory update] vers\xE3o ${latest} dispon\xEDvel (instalada ${installed}) \u2014 rode: opencode plugin add @allansantos-dev/opencode-memory --force`;
+}
 function truncate(s, n) {
   if (s.length <= n) return s;
   return s.slice(0, n - 3) + "...";
@@ -3118,6 +3121,98 @@ init_config();
 init_contracts();
 init_provision();
 
+// src/updateCheck.ts
+import { readFileSync as readFileSync7, writeFileSync as writeFileSync6, renameSync as renameSync5, mkdirSync as mkdirSync5, existsSync as existsSync7 } from "node:fs";
+import { join as join7 } from "node:path";
+var CACHE_FILENAME = "update-cache.json";
+var DEFAULT_TTL_MS = 24 * 60 * 60 * 1e3;
+var DEFAULT_TIMEOUT_MS = 3e3;
+function readInstalledVersion(installRoot, _existsSync = existsSync7, _readFileSync = readFileSync7) {
+  try {
+    const pkgPath = join7(installRoot, "package.json");
+    if (!_existsSync(pkgPath)) return null;
+    const raw = _readFileSync(pkgPath, "utf-8");
+    const data = JSON.parse(raw);
+    if (typeof data.version === "string" && data.version.length > 0) return data.version;
+    return null;
+  } catch {
+    return null;
+  }
+}
+function loadCache(cacheDir, _existsSync = existsSync7, _readFileSync = readFileSync7) {
+  try {
+    const path = join7(cacheDir, CACHE_FILENAME);
+    if (!_existsSync(path)) return null;
+    const raw = _readFileSync(path, "utf-8");
+    const data = JSON.parse(raw);
+    if (typeof data.latestVersion === "string" && typeof data.checkedAt === "number") {
+      return { latestVersion: data.latestVersion, checkedAt: data.checkedAt };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+function saveCache(cacheDir, latestVersion, now, _mkdirSync = mkdirSync5, _writeFileSync = writeFileSync6, _renameSync = renameSync5) {
+  try {
+    _mkdirSync(cacheDir, { recursive: true });
+    const dest = join7(cacheDir, CACHE_FILENAME);
+    const tmp = dest + ".tmp." + process.pid;
+    _writeFileSync(tmp, JSON.stringify({ latestVersion, checkedAt: now }));
+    _renameSync(tmp, dest);
+  } catch {
+  }
+}
+async function fetchLatestFromRegistry(pkgName, opts = {}) {
+  const _fetch = opts._fetch ?? globalThis.fetch;
+  const timeoutMs = opts._timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  if (typeof _fetch !== "function") return null;
+  const url = `https://registry.npmjs.org/${encodeURIComponent(pkgName)}/latest`;
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), timeoutMs);
+  try {
+    const fetchResult = await Promise.race([
+      Promise.resolve(_fetch(url, { signal: ac.signal })),
+      new Promise(
+        (_resolve, reject) => setTimeout(() => reject(new Error("update-check timeout")), timeoutMs).unref?.()
+      )
+    ]);
+    if (!fetchResult || typeof fetchResult !== "object" || typeof fetchResult.json !== "function") return null;
+    const data = await fetchResult.json();
+    if (typeof data.version === "string" && data.version.length > 0) return data.version;
+    return null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+async function checkForUpdate(opts) {
+  const { installedVersion, cacheDir } = opts;
+  if (!installedVersion) return { skipped: "no-package-json" };
+  const now = (opts._now ?? Date.now)();
+  const ttlMs = opts._ttlMs ?? DEFAULT_TTL_MS;
+  const cached = loadCache(cacheDir);
+  if (cached && now - cached.checkedAt < ttlMs) {
+    if (cached.latestVersion === installedVersion) return { skipped: "equal" };
+    return { latestVersion: cached.latestVersion, installedVersion };
+  }
+  const pkgName = opts.pkgName ?? "@allansantos-dev/opencode-memory";
+  const latest = await fetchLatestFromRegistry(pkgName, {
+    _fetch: opts._fetch,
+    _timeoutMs: opts._timeoutMs
+  });
+  if (latest === null) return { skipped: "offline" };
+  saveCache(cacheDir, latest, now);
+  if (latest === installedVersion) return { skipped: "equal" };
+  return { latestVersion: latest, installedVersion };
+}
+
+// src/index.ts
+init_contracts();
+import { fileURLToPath } from "node:url";
+import { dirname } from "node:path";
+
 // src/onboarding-text.ts
 function renderSetupMenu(status) {
   const lines = [];
@@ -3317,9 +3412,9 @@ When server-side ingestion is off but client-side ingestion is on, the capabilit
 
 // src/index.ts
 import { z } from "zod";
-import { join as join7 } from "node:path";
+import { join as join8 } from "node:path";
 import { homedir as homedir5 } from "node:os";
-var PORT_DIR = join7(homedir5(), ".opencode-memory");
+var PORT_DIR = join8(homedir5(), ".opencode-memory");
 var recallCache = /* @__PURE__ */ new Map();
 var turnCount = /* @__PURE__ */ new Map();
 var MAX_SESSION_CACHE = 500;
@@ -3352,6 +3447,15 @@ var reviewSessions = /* @__PURE__ */ new Set();
 var lastReviewAt = 0;
 var curationInFlight = /* @__PURE__ */ new Set();
 var dashboard = null;
+var updateCheckPromise = null;
+var updateCheckedResult = null;
+function pluginInstallRoot() {
+  try {
+    return dirname(dirname(fileURLToPath(import.meta.url)));
+  } catch {
+    return process.cwd();
+  }
+}
 function getClient(url) {
   if (!clientInstance || clientBaseUrl !== url) {
     clientInstance = new MemoryClient(url);
@@ -3416,6 +3520,20 @@ var OpenCodeMemory = async (ctx, options) => {
   return {
     "experimental.chat.system.transform": async (_input, output) => {
       try {
+        if (!updateCheckPromise) {
+          updateCheckPromise = (async () => {
+            const installedVersion = readInstalledVersion(pluginInstallRoot());
+            const cacheDir = PORT_DIR;
+            return await checkForUpdate({ installedVersion: installedVersion ?? "", cacheDir });
+          })();
+          updateCheckPromise.then((r) => {
+            updateCheckedResult = r;
+          }).catch(() => {
+          });
+        }
+        if (updateCheckedResult && "latestVersion" in updateCheckedResult) {
+          output.system.push(buildUpdateHint(updateCheckedResult.latestVersion, updateCheckedResult.installedVersion));
+        }
         if (projectIdStrength(workdir) === "none") {
           output.system.push(MEMORY_FRAGILE_HINT);
         }

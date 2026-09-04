@@ -20,7 +20,7 @@ opencode plugin update --all
 <!-- plugins:start -->
 | Plugin | Versão | Descrição | Categoria |
 |--------|--------|-----------|-----------|
-| [memory](https://github.com/AllanSantos-DV/opencode-memory) | 0.3.0 | Memória persistente entre sessões para o OpenCode - recall semântico, grafo de código, dashboard visual e curadoria automática | productivity |
+| [memory](https://github.com/AllanSantos-DV/opencode-memory) | 0.4.0 | Memória persistente entre sessões para o OpenCode - recall semântico, grafo de código, dashboard visual e curadoria automática | productivity |
 <!-- plugins:end -->
 
 ## Como publicar um plugin
