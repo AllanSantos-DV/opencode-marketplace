@@ -33,9 +33,14 @@ function safeJsonParse(text, fallback) {
     return fallback;
   }
 }
+var ONBOARDING_MODES, MEMORY_UNAVAILABLE_CODE, MEMORY_UNAVAILABLE_MESSAGE, MEMORY_FRAGILE_HINT;
 var init_contracts = __esm({
   "src/contracts.ts"() {
     "use strict";
+    ONBOARDING_MODES = ["local", "remote", "skip", "forget"];
+    MEMORY_UNAVAILABLE_CODE = "MEMORY_UNAVAILABLE";
+    MEMORY_UNAVAILABLE_MESSAGE = "mem\xF3ria indispon\xEDvel porque n\xE3o tem project setado (sem git remote nem .memory/project.json). Rode memory_status; crie via memory_set_project ou configure git origin. Nada foi salvo no global.";
+    MEMORY_FRAGILE_HINT = "[memory] project n\xE3o setado \u2014 saves bloqueados; reads degradados. Rode memory_status e memory_set_project.";
   }
 });
 
@@ -241,19 +246,19 @@ __export(provision_exports, {
   spawnDaemon: () => spawnDaemon,
   verifySha256: () => verifySha256
 });
-import { existsSync as existsSync4, readFileSync as readFileSync4, rmSync, writeFileSync as writeFileSync2, unlinkSync } from "node:fs";
-import { join as join4 } from "node:path";
+import { existsSync as existsSync5, readFileSync as readFileSync5, rmSync, writeFileSync as writeFileSync4, unlinkSync as unlinkSync2 } from "node:fs";
+import { join as join5 } from "node:path";
 import { homedir as homedir3 } from "node:os";
 import { spawn } from "node:child_process";
 function serverDir() {
-  return join4(homedir3(), ".opencode-memory", "server");
+  return join5(homedir3(), ".opencode-memory", "server");
 }
 function parseVersion(tag) {
   const m = tag.match(/^v(\d+)\.(\d+)\.(\d+)$/);
   if (!m) return null;
   return [parseInt(m[1], 10), parseInt(m[2], 10), parseInt(m[3], 10)];
 }
-function versionGte(a, b) {
+function versionGte2(a, b) {
   if (a[0] !== b[0]) return a[0] > b[0];
   if (a[1] !== b[1]) return a[1] > b[1];
   return a[2] >= b[2];
@@ -281,7 +286,7 @@ async function fetchLatestServerRelease(opts) {
       if (r.draft || r.prerelease) continue;
       const ver = parseVersion(r.tag_name);
       if (!ver) continue;
-      if (!versionGte(ver, MIN_VERSION)) continue;
+      if (!versionGte2(ver, MIN_VERSION)) continue;
       const jarAssets = r.assets.filter((a) => /^mcp-memory-server-.*\.jar$/.test(a.name));
       if (jarAssets.length === 0) continue;
       const plainJar = jarAssets.find((a) => !a.name.includes("-gpu")) ?? jarAssets[0];
@@ -294,7 +299,7 @@ async function fetchLatestServerRelease(opts) {
         jarName: plainJar.name,
         sha256Url: sha256Asset?.browser_download_url ?? null
       };
-      if (!best || versionGte(ver, best.version)) {
+      if (!best || versionGte2(ver, best.version)) {
         best = release;
       }
     }
@@ -304,7 +309,7 @@ async function fetchLatestServerRelease(opts) {
   }
 }
 async function resolveJava(opts) {
-  const existsFn = opts._existsSync ?? existsSync4;
+  const existsFn = opts._existsSync ?? existsSync5;
   const env = opts._env ?? process.env;
   const whichFn = opts._which ?? (async (cmd) => {
     try {
@@ -318,12 +323,12 @@ async function resolveJava(opts) {
       return null;
     }
   });
-  const bundled = join4(opts.serverDir, "runtime", "bin", javaBinary());
+  const bundled = join5(opts.serverDir, "runtime", "bin", javaBinary());
   if (existsFn(bundled)) return bundled;
   if (existsFn(bundled + ".exe")) return bundled + ".exe";
   const javaHome = env.JAVA_HOME;
   if (javaHome) {
-    const homeBin = join4(javaHome, "bin", javaBinary());
+    const homeBin = join5(javaHome, "bin", javaBinary());
     if (existsFn(homeBin)) return homeBin;
     if (existsFn(homeBin + ".exe")) return homeBin + ".exe";
   }
@@ -332,30 +337,30 @@ async function resolveJava(opts) {
   return null;
 }
 function lockPath(dir) {
-  return join4(dir, ".provisioning.lock");
+  return join5(dir, ".provisioning.lock");
 }
 async function acquireLock(dir, opts) {
   const lp = lockPath(dir);
   const timeout = opts?.timeoutMs ?? 6e4;
   try {
-    if (existsSync4(lp)) {
-      const raw = readFileSync4(lp, "utf-8");
+    if (existsSync5(lp)) {
+      const raw = readFileSync5(lp, "utf-8");
       const parsed = JSON.parse(raw);
       if (parsed.ts && Date.now() - parsed.ts < LOCK_TTL_MS) {
         const start = Date.now();
         while (Date.now() - start < timeout) {
           await new Promise((r) => setTimeout(r, 500));
-          if (!existsSync4(lp)) break;
-          const re = JSON.parse(readFileSync4(lp, "utf-8"));
+          if (!existsSync5(lp)) break;
+          const re = JSON.parse(readFileSync5(lp, "utf-8"));
           if (re.ts && Date.now() - re.ts >= LOCK_TTL_MS) break;
         }
-        if (existsSync4(lp)) {
-          const re = JSON.parse(readFileSync4(lp, "utf-8"));
+        if (existsSync5(lp)) {
+          const re = JSON.parse(readFileSync5(lp, "utf-8"));
           if (re.ts && Date.now() - re.ts < LOCK_TTL_MS) return false;
         }
       }
     }
-    writeFileSync2(lp, JSON.stringify({ pid: process.pid, ts: Date.now() }));
+    writeFileSync4(lp, JSON.stringify({ pid: process.pid, ts: Date.now() }));
     return true;
   } catch {
     return true;
@@ -364,7 +369,7 @@ async function acquireLock(dir, opts) {
 function releaseLock(dir) {
   try {
     const lp = lockPath(dir);
-    if (existsSync4(lp)) unlinkSync(lp);
+    if (existsSync5(lp)) unlinkSync2(lp);
   } catch {
   }
 }
@@ -403,9 +408,9 @@ async function verifySha256(jarPath, sha256Url, opts) {
     const expected = (await resp.text()).trim().split(/\s+/)[0]?.toLowerCase();
     if (!expected || expected.length !== 64) return false;
     const { readFileSync: rs } = await import("node:fs");
-    const { createHash } = await import("node:crypto");
+    const { createHash: createHash2 } = await import("node:crypto");
     const buf = rs(jarPath);
-    const actual = createHash("sha256").update(buf).digest("hex");
+    const actual = createHash2("sha256").update(buf).digest("hex");
     return actual === expected;
   } catch {
     return false;
@@ -468,8 +473,8 @@ async function ensureServer(opts) {
       if (!release) {
         return { ok: false, reason: "no-release" };
       }
-      const jarPath = join4(sDir, release.jarName);
-      if (!existsSync4(jarPath)) {
+      const jarPath = join5(sDir, release.jarName);
+      if (!existsSync5(jarPath)) {
         const dlFn = opts?._downloadJar ?? ((url, dest) => downloadJar(url, dest));
         const downloaded = await dlFn(release.jarUrl, jarPath);
         if (!downloaded) {
@@ -896,7 +901,7 @@ function explainError(e) {
 // src/projectId.ts
 init_contracts();
 import { execFileSync } from "node:child_process";
-import { existsSync as existsSync3, readFileSync as readFileSync3 } from "node:fs";
+import { existsSync as existsSync3, readFileSync as readFileSync3, mkdirSync as mkdirSync2, writeFileSync as writeFileSync2, renameSync as renameSync2 } from "node:fs";
 import { join as join3, isAbsolute } from "node:path";
 function normalizeGitRemote(remoteUrl) {
   if (!remoteUrl) return null;
@@ -932,19 +937,24 @@ function gitRepoBase(workspacePath) {
   return git(["rev-parse", "--show-toplevel"], workspacePath);
 }
 function findProjectRoot(workspacePath) {
-  let dir = workspacePath;
-  for (let i = 0; i < 20; i++) {
-    const candidate = join3(dir, ".memory", "project.json");
-    if (existsSync3(candidate)) return dir;
-    const parent = join3(dir, "..");
-    if (parent === dir) break;
-    dir = parent;
-  }
   const toplevel = gitRepoBase(workspacePath);
   if (toplevel) {
-    const candidate = join3(toplevel, ".memory", "project.json");
-    if (existsSync3(candidate)) return toplevel;
+    let dir = workspacePath;
+    const top = toplevel.toLowerCase();
+    for (let i = 0; i < 20; i++) {
+      const candidate3 = join3(dir, ".memory", "project.json");
+      if (existsSync3(candidate3)) return dir;
+      if (dir.toLowerCase() === top) break;
+      const parent = join3(dir, "..");
+      if (parent === dir) break;
+      dir = parent;
+    }
+    const candidate2 = join3(toplevel, ".memory", "project.json");
+    if (existsSync3(candidate2)) return toplevel;
+    return null;
   }
+  const candidate = join3(workspacePath, ".memory", "project.json");
+  if (existsSync3(candidate)) return workspacePath;
   return null;
 }
 function assertSafeProjectId(projectId) {
@@ -963,11 +973,38 @@ function readDeclaredProjectId(workspacePath) {
     const raw = readFileSync3(join3(root, ".memory", "project.json"), "utf-8");
     const data = safeJsonParse(raw, null);
     if (!data) return null;
-    const pid = data.metadata ? data.metadata.project_id : data.project_id;
+    const meta = data.metadata;
+    const pid = meta ? meta.project_id ?? meta.defaults?.project_id : data.project_id;
     if (typeof pid === "string" && pid.length > 0) return assertSafeProjectId(pid);
     return null;
   } catch {
     return null;
+  }
+}
+function validateDeclaredProjectId(input) {
+  if (!input || input.trim().length === 0) return { ok: false, error: "project_id must not be empty" };
+  const id = input.trim();
+  if (id.split("/").includes("..")) return { ok: false, error: "project_id must not contain '..' segments" };
+  try {
+    return { ok: true, id: assertSafeProjectId(id) };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+function writeDeclaredProjectId(workspacePath, projectId) {
+  const v = validateDeclaredProjectId(projectId);
+  if (!v.ok) return v;
+  try {
+    const toplevel = gitRepoBase(workspacePath) ?? workspacePath;
+    const dir = join3(toplevel, ".memory");
+    mkdirSync2(dir, { recursive: true });
+    const dest = join3(dir, "project.json");
+    const tmp = dest + ".tmp." + process.pid;
+    writeFileSync2(tmp, JSON.stringify({ project_id: v.id }, null, 2));
+    renameSync2(tmp, dest);
+    return { ok: true, path: dest };
+  } catch (e) {
+    return { ok: false, error: String(e) };
   }
 }
 function resolveProjectId(workspacePath) {
@@ -1140,6 +1177,7 @@ async function composeRecall(client, workingDirectory, query, opts) {
   } catch {
   }
   try {
+    if (!projectId) return { text: "", count: 0, source: "empty" };
     try {
       if (!overallSignal.aborted) {
         const composeOpts = {
@@ -1229,6 +1267,9 @@ function buildSystemPromptInjection(ctx) {
   if (parts.length === 0) return null;
   return parts.join("\n\n");
 }
+
+// src/index.ts
+init_contracts();
 
 // src/skill.ts
 var NEGATIVE_TRIGGERS = /não use|não utilise|avoid|do not use|não execute|do not execute|não aplique|do not apply/i;
@@ -1732,19 +1773,247 @@ async function tagOnMiss(client, root, opts) {
 // src/dashboard.ts
 init_contracts();
 import { createServer } from "node:http";
-import { readFileSync as readFileSync5, writeFileSync as writeFileSync3, existsSync as existsSync5, mkdirSync as mkdirSync2, renameSync as renameSync2, unlinkSync as unlinkSync2 } from "node:fs";
-import { join as join5 } from "node:path";
+import { readFileSync as readFileSync6, writeFileSync as writeFileSync5, existsSync as existsSync6, mkdirSync as mkdirSync4, renameSync as renameSync4, unlinkSync as unlinkSync3 } from "node:fs";
+import { join as join6 } from "node:path";
 import { homedir as homedir4 } from "node:os";
 init_daemon();
+
+// src/doctor.ts
+import { readdirSync } from "node:fs";
+var WORST = { ok: 0, warn: 1, fail: 2 };
+function installedJarVersion(dir) {
+  let best = null;
+  try {
+    for (const f of readdirSync(dir)) {
+      if (!/^mcp-memory-server-.*\.jar$/i.test(f)) continue;
+      const m = /(\d+)\.(\d+)\.(\d+)/.exec(f);
+      if (!m) continue;
+      const v = [Number(m[1]), Number(m[2]), Number(m[3])];
+      if (!best || versionGte(v, best)) best = v;
+    }
+  } catch {
+    return null;
+  }
+  return best ? best.join(".") : null;
+}
+function versionGte(a, b) {
+  return a[0] > b[0] || a[0] === b[0] && (a[1] > b[1] || a[1] === b[1] && a[2] >= b[2]);
+}
+async function check(fn) {
+  try {
+    return await fn();
+  } catch (e) {
+    return { status: "fail", error: e instanceof Error ? e.message : String(e) };
+  }
+}
+async function runDoctor(deps) {
+  const [config, daemon, java, jar, dashboard2, graph] = await Promise.all([
+    // 1. config — parseable? URL valid? env override?
+    check(async () => {
+      const cfg = deps.readConfig();
+      const parts = [];
+      if (deps.envValue !== void 0 && deps.envValue !== "") {
+        parts.push(`env override active: ${deps.envKey} takes precedence over config.json`);
+      }
+      if (cfg.daemonUrl) {
+        const v = deps.validateDaemonUrl(cfg.daemonUrl);
+        if (!v.ok) return { status: "fail", error: `invalid configured URL: ${v.error}` };
+        parts.push(`configured URL ${v.url} is valid`);
+      } else {
+        parts.push("no daemon URL configured yet");
+      }
+      if (cfg.onboarded === true && cfg.daemonUrl) parts.push("onboarded");
+      return { status: "ok", detail: parts.join("; ") };
+    }),
+    // 2. daemon — reachable? source?
+    check(async () => {
+      const d = await deps.resolveDaemon();
+      if (!d.info) {
+        return {
+          status: "fail",
+          detail: `source=${d.source}`,
+          error: "no daemon discovered \u2014 run memory_setup or start the server"
+        };
+      }
+      const alive = await deps.health(d.info.url);
+      if (!alive) {
+        return {
+          status: "warn",
+          detail: `${d.info.url} (source=${d.source})`,
+          error: "daemon unreachable \u2014 health check failed"
+        };
+      }
+      return { status: "ok", detail: `${d.info.url} (source=${d.source})` };
+    }),
+    // 3. java — found? path?
+    check(async () => {
+      const java2 = await deps.resolveJava();
+      if (!java2) {
+        return { status: "fail", error: "Java runtime not found \u2014 install Temurin 21+ (adoptium.net)" };
+      }
+      return { status: "ok", detail: java2 };
+    }),
+    // 4. jar — installed? behind latest release?
+    check(async () => {
+      if (!deps.jarExists()) {
+        return {
+          status: "fail",
+          detail: deps.serverDir(),
+          error: "server JAR not installed \u2014 run memory_setup mode=local"
+        };
+      }
+      let detail = deps.serverDir();
+      const installed = deps.installedVersion();
+      const latest = await deps.latestVersion();
+      if (installed && latest && installed !== latest) {
+        return { status: "warn", detail: `${detail} \u2014 behind latest (${installed} < ${latest}); update available` };
+      }
+      if (installed && latest) detail += ` (v${installed}, up to date)`;
+      else detail += " (version check unavailable)";
+      return { status: "ok", detail };
+    }),
+    // 5. dashboard — port file? alive? auth token present?
+    //    dead recorded port = inconsistent on-disk state -> fail (worse than an
+    //    unconfigured daemon, which is a normal pre-setup condition)
+    check(async () => {
+      const dir = deps.portDir();
+      const port = deps.readPortFile(dir);
+      if (port === null) {
+        return { status: "warn", detail: `no port file at ${dir}`, error: "dashboard never started \u2014 call memory_dashboard to open it" };
+      }
+      const probe = await deps.isAlive(port);
+      if (!probe.alive) {
+        return { status: "fail", detail: `port file points at ${port}`, error: "dashboard not responding on recorded port" };
+      }
+      const auth = deps.readTokenFile(dir);
+      if (!auth) {
+        return { status: "warn", detail: `alive on ${port} (${probe.generation})`, error: "dashboard-auth.json missing or unreadable" };
+      }
+      return { status: "ok", detail: `alive on ${port} (generation=${probe.generation}, token present)` };
+    }),
+    // 6. graph — ready / indexing / empty
+    check(async () => {
+      const st = await deps.graphStatus(deps.workdir);
+      if (st.state === "ready") return { status: "ok", detail: `state=ready, nodes=${st.nodes}` };
+      if (st.state === "indexing") {
+        return { status: "warn", detail: "state=indexing \u2014 try again shortly" };
+      }
+      return { status: "warn", detail: `state=${st.state} \u2014 run graph_analyze to index the project` };
+    })
+  ]);
+  const checks = { config, daemon, java, jar, dashboard: dashboard2, graph };
+  return aggregate(checks);
+}
+function aggregate(checks) {
+  let worst = "ok";
+  for (const c of Object.values(checks)) {
+    if (WORST[c.status] > WORST[worst]) worst = c.status;
+  }
+  return { status: worst, checks };
+}
+function renderDoctor(report) {
+  const icon = { ok: "OK  ", warn: "WARN", fail: "FAIL" };
+  const lines = [];
+  for (const [key, c] of Object.entries(report.checks)) {
+    lines.push(`[${icon[c.status]}] ${key}${c.detail ? ` \u2014 ${c.detail}` : ""}${c.error ? ` (${c.error})` : ""}`);
+  }
+  lines.push(`overall: ${report.status}`);
+  return lines.join("\n");
+}
+
+// src/dashboard.ts
 init_config();
+
+// src/authToken.ts
+init_contracts();
+import { randomBytes, createHash, timingSafeEqual } from "node:crypto";
+import { existsSync as existsSync4, readFileSync as readFileSync4, writeFileSync as writeFileSync3, renameSync as renameSync3, unlinkSync, mkdirSync as mkdirSync3 } from "node:fs";
+import { join as join4 } from "node:path";
+function generateToken() {
+  return randomBytes(32).toString("hex");
+}
+function authFilePath(dir) {
+  return join4(dir, "dashboard-auth.json");
+}
+function readTokenFile(dir) {
+  try {
+    const file = authFilePath(dir);
+    if (!existsSync4(file)) return null;
+    const raw = readFileSync4(file, "utf-8");
+    const parsed = JSON.parse(raw);
+    if (typeof parsed.token !== "string" || !/^[0-9a-f]{64}$/.test(parsed.token)) return null;
+    return { token: parsed.token, issuedAt: typeof parsed.issuedAt === "number" ? parsed.issuedAt : 0 };
+  } catch {
+    return null;
+  }
+}
+async function readTokenFileWithRetry(dir, opts) {
+  const retries = opts?.retries ?? 10;
+  const delayMs = opts?.delayMs ?? 50;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const found = readTokenFile(dir);
+    if (found) return found;
+    if (attempt < retries) await sleep(delayMs);
+  }
+  throw new Error(`dashboard-auth.json missing, unreadable or corrupt on reused dashboard after ${retries + 1} reads`);
+}
+function writeTokenFile(dir, token) {
+  mkdirSync3(dir, { recursive: true });
+  const file = authFilePath(dir);
+  const tmp = `${file}.tmp.${process.pid}`;
+  writeFileSync3(tmp, JSON.stringify({ token, issuedAt: Date.now() }));
+  try {
+    renameSync3(tmp, file);
+  } catch (e) {
+    try {
+      unlinkSync(tmp);
+    } catch {
+    }
+    throw e;
+  }
+}
+function tokenMatches(provided, expected) {
+  if (!provided || typeof provided !== "string") return false;
+  const a = createHash("sha256").update(provided).digest();
+  const b = createHash("sha256").update(expected).digest();
+  return timingSafeEqual(a, b);
+}
+var FailureWindow = class {
+  #windowMs;
+  #threshold;
+  #attempts = [];
+  constructor(opts) {
+    this.#windowMs = opts?.windowMs ?? 6e4;
+    this.#threshold = opts?.threshold ?? 20;
+  }
+  recordFailure(now = Date.now()) {
+    this.#attempts.push(now);
+    this.#prune(now);
+  }
+  locked(now = Date.now()) {
+    this.#prune(now);
+    return this.#attempts.length > this.#threshold;
+  }
+  reset() {
+    this.#attempts.length = 0;
+  }
+  #prune(now) {
+    const cutoff = now - this.#windowMs;
+    while (this.#attempts.length > 0 && this.#attempts[0] <= cutoff) {
+      this.#attempts.shift();
+    }
+  }
+};
+
+// src/dashboard.ts
 function portFilePath(dir) {
-  return join5(dir, "dashboard-port.json");
+  return join6(dir, "dashboard-port.json");
 }
 function readPortFile(dir) {
   try {
     const p = portFilePath(dir);
-    if (!existsSync5(p)) return null;
-    const raw = readFileSync5(p, "utf-8");
+    if (!existsSync6(p)) return null;
+    const raw = readFileSync6(p, "utf-8");
     const data = safeJsonParse(raw, null);
     if (data && typeof data.port === "number" && data.port > 0) return data.port;
     return null;
@@ -1754,15 +2023,15 @@ function readPortFile(dir) {
 }
 function writePortFile(dir, port) {
   try {
-    mkdirSync2(dir, { recursive: true });
+    mkdirSync4(dir, { recursive: true });
     const file = portFilePath(dir);
     const tmp = `${file}.tmp.${process.pid}`;
-    writeFileSync3(tmp, JSON.stringify({ port }));
+    writeFileSync5(tmp, JSON.stringify({ port }));
     try {
-      renameSync2(tmp, file);
+      renameSync4(tmp, file);
     } catch (e) {
       try {
-        unlinkSync2(tmp);
+        unlinkSync3(tmp);
       } catch {
       }
       throw e;
@@ -1772,33 +2041,86 @@ function writePortFile(dir, port) {
 }
 var activeDashboardPorts = /* @__PURE__ */ new Set();
 async function isAlive(port, timeoutMs = 500) {
-  try {
-    let signal;
-    let timer;
-    if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") {
-      signal = AbortSignal.timeout(timeoutMs);
-    } else {
-      const ac = new AbortController();
-      signal = ac.signal;
-      void sleep(timeoutMs).then(() => {
-        try {
-          ac.abort();
-        } catch {
-        }
-      });
-      timer = setTimeout(() => {
-        try {
-          ac.abort();
-        } catch {
-        }
-      }, timeoutMs);
+  const aliveWith = (generation) => ({ alive: true, generation });
+  const probe = async (path) => {
+    try {
+      const signal = typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function" ? (
+        // @ts-ignore — same reason
+        AbortSignal.timeout(timeoutMs)
+      ) : void 0;
+      const res = await fetch(`http://127.0.0.1:${port}${path}`, { signal });
+      void res.body?.cancel();
+      return { status: res.status };
+    } catch {
+      return null;
     }
-    const r = await fetch(`http://127.0.0.1:${port}/api/data`, { signal });
-    if (timer) clearTimeout(timer);
-    return r.ok;
+  };
+  try {
+    const hz = await probe("/healthz");
+    if (hz?.status === 200) return aliveWith("auth");
+    const data = await probe("/api/data");
+    if (data?.status === 200) return aliveWith("legacy");
+    if (data?.status === 401) return aliveWith("auth");
+    if (hz !== null || data !== null) return aliveWith("unknown");
+    const hz2 = await probe("/healthz");
+    if (hz2 !== null) return aliveWith("unknown");
+    return { alive: false, generation: "unknown" };
   } catch {
-    return false;
+    return { alive: false, generation: "unknown" };
   }
+}
+async function peerGeneration(port, timeoutMs = 500) {
+  const fetchCapped = async (path) => {
+    const signal = typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function" ? (
+      // @ts-ignore — same reason
+      AbortSignal.timeout(timeoutMs)
+    ) : void 0;
+    return await fetch(`http://127.0.0.1:${port}${path}`, { signal });
+  };
+  try {
+    const hz = await fetchCapped("/healthz");
+    try {
+      if (hz.status !== 200) return null;
+      const len = Number(hz.headers.get("content-length") ?? "0");
+      if (len > 256) return null;
+      const raw = await hz.text();
+      if (raw.length > 256) return null;
+      const body = JSON.parse(raw);
+      if (!body || typeof body !== "object" || body.ok !== true || Object.keys(body).length !== 1) return null;
+    } finally {
+      void hz.body?.cancel().catch(() => {
+      });
+    }
+    const data = await fetchCapped("/api/data");
+    void data.body?.cancel();
+    return data.status === 401 ? "auth" : data.status === 200 ? "legacy" : null;
+  } catch {
+    return null;
+  }
+}
+function lockedHtml() {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OpenCode Memory Dashboard \u2014 Locked</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0d1117; color: #c9d1d9; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
+  .box { max-width: 460px; padding: 32px; background: #161b22; border: 1px solid #30363d; border-radius: 10px; text-align: center; }
+  h1 { font-size: 1.2rem; color: #f0883e; margin-bottom: 12px; }
+  p { font-size: .92rem; line-height: 1.5; color: #8b949e; margin: 8px 0; }
+  code { background: #21262d; padding: 2px 6px; border-radius: 5px; color: #79c0ff; font-size: .85rem; }
+</style>
+</head>
+<body>
+<div class="box">
+  <h1>Session expired or invalid</h1>
+  <p>This dashboard requires a fresh access link.</p>
+  <p>Reopen it from OpenCode by running the <code>memory_dashboard</code> tool.</p>
+</div>
+</body>
+</html>`;
 }
 function spaHtml() {
   return `<!DOCTYPE html>
@@ -1848,6 +2170,7 @@ function spaHtml() {
       <button data-mode="local" onclick="onboardingSetup('local')">Download &amp; run locally</button>
       <button data-mode="remote" onclick="onboardingSetup('remote')">Point to running server</button>
       <button data-mode="skip" onclick="onboardingSetup('skip')">Skip \u2014 I'll configure later</button>
+      <button data-mode="forget" onclick="onboardingSetup('forget')">Forget saved URL</button>
     </div>
     <input type="text" id="onb-remote-url" placeholder="http://host:port (for remote mode)">
     <div id="onb-result"></div>
@@ -1878,10 +2201,38 @@ function spaHtml() {
 <div id="status-bar">Auto-refresh: 5s</div>
 <script>
 let busy = false;
+var TOKEN_KEY = 'opencode-memory-dash-token';
 function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function getToken() { try { return sessionStorage.getItem(TOKEN_KEY) || ''; } catch (e) { return ''; } }
+function setToken(t) { try { sessionStorage.setItem(TOKEN_KEY, t); } catch (e) {} }
+function clearToken() { try { sessionStorage.removeItem(TOKEN_KEY); } catch (e) {} }
+// ADR-006 M1/A-1: every API call carries the token via header (query ?t= is bootstrap-only)
+async function authFetch(path, opts) {
+  opts = opts || {};
+  opts.headers = Object.assign({}, opts.headers || {}, { 'X-Memory-Token': getToken() });
+  return fetch(path, opts);
+}
+// ADR-006 A-4(c): no/invalid token -> friendly locked page, canonical entrypoint is the tool
+function showLocked() {
+  document.body.innerHTML = '<div class="box"><h1>Session expired or invalid</h1>' +
+    '<p>This dashboard requires a fresh access link.</p>' +
+    '<p>Reopen it from OpenCode by running the <code>memory_dashboard</code> tool.</p></div>';
+}
+// gate Fase-2 major: a mid-session 401 must STOP polling and lock the UI \u2014
+// silently swallowing 401s would feed the invalid-credential window forever
+var LOCKED = false;
+var TIMERS = [];
+function lockNow() {
+  if (LOCKED) return;
+  LOCKED = true;
+  clearToken();
+  TIMERS.forEach(clearInterval);
+  showLocked();
+}
 async function loadOnboarding() {
   try {
-    const r = await fetch('/api/onboarding/status');
+    const r = await authFetch('/api/onboarding/status');
+    if (r.status === 401) { lockNow(); return; }
     if (!r.ok) return;
     const s = await r.json();
     renderOnboarding(s);
@@ -1915,11 +2266,12 @@ async function onboardingSetup(mode) {
   if (resultEl) resultEl.innerHTML = '<span class="empty">Working... (download may take a while)</span>';
   document.querySelectorAll('.onb-modes button').forEach(b => b.disabled = true);
   try {
-    const r = await fetch('/api/onboarding/setup', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    const r = await authFetch('/api/onboarding/setup', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
     const res = await r.json();
     if (res.ok) {
       const verified = res.verified === undefined ? '' : (res.verified ? ' \u2014 health check OK' : ' \u2014 WARNING: health check failed');
-      resultEl.innerHTML = '<span class="empty">Done: ' + esc(res.mode) + verified + '</span>';
+      const extra = res.mode === 'forget' ? ' \u2014 saved URL cleared' : '';
+      resultEl.innerHTML = '<span class="empty">Done: ' + esc(res.mode) + verified + extra + '</span>';
     } else {
       resultEl.innerHTML = '<span class="empty">Failed: ' + esc(res.error || 'unknown error') + '</span>';
     }
@@ -1934,7 +2286,8 @@ async function load() {
   if (busy) return;
   busy = true;
   try {
-    const r = await fetch('/api/data');
+    const r = await authFetch('/api/data');
+    if (r.status === 401) { lockNow(); return; }
     if (!r.ok) return;
     const d = await r.json();
     renderStatus(d);
@@ -1982,7 +2335,7 @@ async function doSearch() {
   const el = document.getElementById('search-results');
   el.innerHTML = '<span class="empty">Searching...</span>';
   try {
-    const r = await fetch('/api/search?q=' + encodeURIComponent(q));
+    const r = await authFetch('/api/search?q=' + encodeURIComponent(q));
     const results = await r.json();
     if (!results.length) { el.innerHTML = '<span class="empty">No results</span>'; return; }
     el.innerHTML = results.map(r =>
@@ -1992,23 +2345,49 @@ async function doSearch() {
 }
 async function saveConfig() {
   const url = document.getElementById('config-url').value;
-  await fetch('/api/config', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({url}) });
+  await authFetch('/api/config', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({url}) });
   load();
 }
 async function clearConfig() {
-  await fetch('/api/config', { method: 'DELETE' });
+  await authFetch('/api/config', { method: 'DELETE' });
   load();
 }
 async function doProvision() {
   const el = document.getElementById('config-content');
   el.innerHTML = '<span class="empty">Provisioning...</span>';
-  await fetch('/api/setup', { method: 'POST' });
+  await authFetch('/api/setup', { method: 'POST' });
   load();
 }
-load();
-loadOnboarding();
-setInterval(() => { if (!busy) load(); }, 5000);
-setInterval(loadOnboarding, 15000);
+// \u2500\u2500\u2500 Boot (ADR-006 A-4): three branches \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+// (b) ?t= in URL -> persist + history.replaceState (token leaves the address bar)
+// (a) token in sessionStorage -> verify via GET / with header; 401 clears and locks
+// (c) no/invalid token -> friendly locked page pointing at memory_dashboard
+(async function boot() {
+  var qs = new URLSearchParams(location.search);
+  var t = qs.get('t');
+  if (t) {
+    setToken(t);
+    qs.delete('t');
+    var clean = location.pathname + (qs.toString() ? '?' + qs.toString() : '');
+    // C2: the token must leave the address bar; if replaceState is unavailable,
+    // fall back to a clean reload instead of keeping the credential in history
+    try { history.replaceState(null, '', clean); } catch (e) { try { location.replace(location.pathname); } catch (e2) {} }
+  }
+  var tok = getToken();
+  if (tok) {
+    try {
+      var probe = await fetch('/', { headers: { 'X-Memory-Token': tok } });
+      if (probe.ok) {
+        load(); loadOnboarding();
+        TIMERS.push(setInterval(function(){ if (!busy) load(); }, 5000));
+        TIMERS.push(setInterval(loadOnboarding, 15000));
+        return;
+      }
+    } catch (e) {}
+    clearToken();
+  }
+  showLocked();
+})();
 </script>
 </body>
 </html>`;
@@ -2020,9 +2399,17 @@ var MemoryDashboard = class {
   #configDir;
   #portDir;
   #resolveDaemonFn;
+  #serverDirFn;
+  #readPortFileFn;
+  #adoptTokenFn;
+  #freshTokenFn;
+  #ownedPort = null;
   #javaCheckFn;
   #healthProbeFn;
   #healthVerifyFn;
+  #token = null;
+  #bootstrapUrl = null;
+  #failures = new FailureWindow();
   #server = null;
   #url = null;
   #clientCache = null;
@@ -2034,8 +2421,15 @@ var MemoryDashboard = class {
     this.#provisioner = opts?.provisioner ?? (() => Promise.resolve({ ok: false, reason: "no-provisioner" }));
     this.#clientFactory = opts?.clientFactory ?? ((u) => new MemoryClient(u));
     this.#configDir = opts?._configDir ?? CONFIG_DIR;
-    this.#portDir = opts?._portDir ?? join5(homedir4(), ".opencode-memory");
+    this.#portDir = opts?._portDir ?? join6(homedir4(), ".opencode-memory");
+    this.#readPortFileFn = opts?._readPortFile ?? readPortFile;
+    this.#adoptTokenFn = opts?._adoptTokenRead ?? ((dir) => readTokenFileWithRetry(dir));
+    this.#freshTokenFn = opts?._freshTokenRead ?? readTokenFile;
     this.#resolveDaemonFn = opts?._resolveDaemon ?? resolveDaemon;
+    this.#serverDirFn = opts?._serverDir ?? (async () => {
+      const { serverDir: serverDir2 } = await Promise.resolve().then(() => (init_provision(), provision_exports));
+      return serverDir2();
+    });
     this.#javaCheckFn = opts?._javaCheck ?? (async (dir) => {
       try {
         const { resolveJava: resolveJava2 } = await Promise.resolve().then(() => (init_provision(), provision_exports));
@@ -2098,7 +2492,7 @@ var MemoryDashboard = class {
         strength,
         fragile,
         hasConfig: !!config.daemonUrl,
-        configPath: join5(this.#configDir, "config.json"),
+        configPath: join6(this.#configDir, "config.json"),
         workdir: cwd
       },
       recent: [],
@@ -2190,8 +2584,7 @@ var MemoryDashboard = class {
   }
   async #javaOk() {
     try {
-      const { serverDir: serverDir2 } = await Promise.resolve().then(() => (init_provision(), provision_exports));
-      return await this.#javaCheckFn(serverDir2()) !== null;
+      return await this.#javaCheckFn(await this.#serverDirFn()) !== null;
     } catch {
       return false;
     }
@@ -2209,7 +2602,11 @@ var MemoryDashboard = class {
     }
     const urlSource = process.env.OPENCODE_MEMORY_DAEMON_URL ? "env" : config.daemonUrl ? "config" : "none";
     const javaOk = await this.#javaOk();
-    const jarInstalled = existsSync5(join5(this.#configDir, "server"));
+    let jarInstalled = false;
+    try {
+      jarInstalled = installedJarVersion(await this.#serverDirFn()) !== null;
+    } catch {
+    }
     return {
       hasDaemon: result.info !== null,
       reachable: result.info !== null,
@@ -2218,13 +2615,26 @@ var MemoryDashboard = class {
       javaOk,
       jarInstalled,
       onboarded: config.onboarded === true,
-      actions: !result.info && result.source === "configured-unreachable" ? ["retest", "replace-url", "clear-url"] : []
+      source: result.source,
+      actions: !result.info && result.source === "configured-unreachable" ? ["retest", "replace-url", "forget-url"] : []
     };
   }
   async onboardingSetup(input) {
     const mode = input?.mode;
-    if (mode !== "local" && mode !== "remote" && mode !== "skip") {
+    if (mode !== "local" && mode !== "remote" && mode !== "skip" && mode !== "forget") {
       return { ok: false, mode: String(mode ?? ""), error: `invalid mode: ${String(mode)}` };
+    }
+    const ignoredUrlWarning = input.url !== void 0 && input.url !== "" && (mode === "local" || mode === "skip") ? `url ignored with mode=${mode} \u2014 url only applies to mode=remote` : void 0;
+    if (mode === "forget") {
+      if (input.url !== void 0 && input.url !== "") {
+        return { ok: false, mode, error: "mode=forget takes no url" };
+      }
+      const { clearDaemonUrl: clearDaemonUrl2 } = await Promise.resolve().then(() => (init_config(), config_exports));
+      const cleared = clearDaemonUrl2(this.#configDir);
+      if (!cleared.ok) {
+        return { ok: false, mode, error: `failed to forget daemon URL: ${cleared.error}` };
+      }
+      return { ok: true, mode };
     }
     if (mode === "skip") {
       const { writeConfigPatch: writeConfigPatch2 } = await Promise.resolve().then(() => (init_config(), config_exports));
@@ -2232,7 +2642,7 @@ var MemoryDashboard = class {
       if (!written.ok) {
         return { ok: false, mode, error: `failed to persist onboarded flag: ${written.error}` };
       }
-      return { ok: true, mode };
+      return ignoredUrlWarning ? { ok: true, mode, warning: ignoredUrlWarning } : { ok: true, mode };
     }
     if (mode === "remote") {
       const url = input.url;
@@ -2245,10 +2655,10 @@ var MemoryDashboard = class {
       try {
         probe = await this.#healthProbeFn(v.url);
       } catch (e) {
-        return { ok: false, mode, error: `health check failed: ${String(e)}` };
+        return { ok: false, mode, error: `health check failed: ${String(e)} \u2014 or try memory_setup("local") to download and start a server` };
       }
       if (!probe.ok) {
-        return { ok: false, mode, error: `server unreachable at ${v.url} (/health failed)` };
+        return { ok: false, mode, error: `server unreachable at ${v.url} (/health failed) \u2014 check host/port, or try memory_setup("local") to install one` };
       }
       const { saveDaemonUrl: saveDaemonUrl2 } = await Promise.resolve().then(() => (init_config(), config_exports));
       const saved = saveDaemonUrl2(v.url, this.#configDir);
@@ -2259,11 +2669,14 @@ var MemoryDashboard = class {
       } catch (e) {
         return { ok: false, mode, daemonUrl: saved.url, error: `verify failed: ${String(e)}` };
       }
+      const envOverride = process.env.OPENCODE_MEMORY_DAEMON_URL ? "WARNING: OPENCODE_MEMORY_DAEMON_URL env var overrides this saved URL" : void 0;
       return {
         ok: true,
         mode,
         verified: verify.ok,
         daemonUrl: saved.url,
+        ...envOverride ? { warning: envOverride } : {},
+        // gate Fase-4 #6: ignoredUrlWarning is only defined for local|skip — remote takes none
         ...verify.ok ? {} : { error: "saved but /health did not confirm after save" }
       };
     }
@@ -2277,7 +2690,7 @@ var MemoryDashboard = class {
       return {
         ok: false,
         mode,
-        error: `provision failed: ${prov.reason ?? "unknown"}`
+        error: `provision failed: ${prov.reason ?? "unknown"} \u2014 or try memory_setup("remote", url) to point to an already-running server`
       };
     }
     try {
@@ -2291,6 +2704,7 @@ var MemoryDashboard = class {
         mode,
         verified: verify.ok,
         daemonUrl: result.info.url,
+        ...ignoredUrlWarning ? { warning: ignoredUrlWarning } : {},
         ...verify.ok ? {} : { error: "daemon discovered but /health did not confirm" }
       };
     } catch (e) {
@@ -2300,6 +2714,14 @@ var MemoryDashboard = class {
   async stop() {
     const server = this.#server;
     this.#server = null;
+    if (this.#ownedPort !== null) {
+      activeDashboardPorts.delete(this.#ownedPort);
+      this.#ownedPort = null;
+    }
+    this.#bootstrapUrl = null;
+    this.#url = null;
+    this.url = null;
+    this.#token = null;
     if (!server) return;
     await new Promise((resolve) => {
       try {
@@ -2310,63 +2732,99 @@ var MemoryDashboard = class {
     });
   }
   async startServer() {
-    if (this.#server) return await this.ensureServer();
+    if (this.#server) {
+      if (this.#bootstrapUrl) return this.#bootstrapUrl;
+      return await this.ensureServer();
+    }
     if (this.#starting) return this.#starting;
     this.#starting = (async () => {
-      const preferred = readPortFile(this.#portDir);
-      if (preferred && !activeDashboardPorts.has(preferred) && await isAlive(preferred)) {
-        this.#url = `http://127.0.0.1:${preferred}`;
-        this.url = this.#url;
-        return this.#url;
+      const preferred = this.#readPortFileFn(this.#portDir);
+      if (preferred && !activeDashboardPorts.has(preferred)) {
+        const probe = await isAlive(preferred);
+        if (probe.alive) {
+          const gen = await peerGeneration(preferred);
+          if (gen === "auth") {
+            this.#token = await this.#loadOrCreateToken({ reuseOnly: true });
+            this.#url = `http://127.0.0.1:${preferred}`;
+            this.url = this.#url;
+            this.#bootstrapUrl = `${this.#url}/?t=${this.#token}`;
+            return this.#bootstrapUrl;
+          }
+        }
       }
-      return new Promise((resolve) => {
+      return new Promise((resolve, reject) => {
+        let settled = false;
+        const settleResolve = (v) => {
+          if (settled) return;
+          settled = true;
+          resolve(v);
+        };
+        const settleReject = (e) => {
+          if (settled) return;
+          settled = true;
+          reject(e instanceof Error ? e : new Error(String(e)));
+        };
         const server = createServer((req, res) => {
           this.#handleRequest(req, res);
         });
         server.listen(0, "127.0.0.1", async () => {
-          const addr = server.address();
-          if (addr && typeof addr === "object") {
-            const actualPort = addr.port;
-            this.#server = server;
-            this.#url = `http://127.0.0.1:${actualPort}`;
-            this.url = this.#url;
-            writePortFile(this.#portDir, actualPort);
-            activeDashboardPorts.add(actualPort);
+          const actualPort = (() => {
+            const addr = server.address();
+            return addr && typeof addr === "object" ? addr.port : null;
+          })();
+          if (actualPort === null) {
+            settleResolve("http://127.0.0.1:0");
+            return;
+          }
+          try {
+            await this.#finalizeBind(server, actualPort, settleResolve, settleReject);
+          } catch (e) {
             try {
-              const after = readPortFile(this.#portDir);
-              if (after !== null && after !== actualPort && await isAlive(after)) {
-                try {
-                  server.close();
-                } catch {
-                }
-                activeDashboardPorts.delete(actualPort);
-                this.#server = null;
-                this.#url = `http://127.0.0.1:${after}`;
-                this.url = this.#url;
-                resolve(this.#url);
-                return;
-              }
+              server.close();
             } catch {
             }
-            resolve(this.#url);
-          } else {
-            resolve("http://127.0.0.1:0");
+            activeDashboardPorts.delete(actualPort);
+            this.#ownedPort = null;
+            this.#token = null;
+            this.#server = null;
+            this.#url = null;
+            this.url = null;
+            this.#bootstrapUrl = null;
+            settleReject(e instanceof Error ? e : new Error(String(e)));
           }
         });
         server.on("error", () => {
           const fallback = createServer((req, res) => {
             this.#handleRequest(req, res);
           });
-          fallback.listen(0, "127.0.0.1", () => {
-            const addr = fallback.address();
-            if (addr && typeof addr === "object") {
-              this.#server = fallback;
-              this.#url = `http://127.0.0.1:${addr.port}`;
-              this.url = this.#url;
-              writePortFile(this.#portDir, addr.port);
-              activeDashboardPorts.add(addr.port);
+          fallback.on("error", (e) => {
+            settleReject(e instanceof Error ? e : new Error(String(e)));
+          });
+          fallback.listen(0, "127.0.0.1", async () => {
+            const fbPort = (() => {
+              const addr = fallback.address();
+              return addr && typeof addr === "object" ? addr.port : null;
+            })();
+            if (fbPort === null) {
+              settleResolve("http://127.0.0.1:0");
+              return;
             }
-            resolve(this.#url ?? "http://127.0.0.1:0");
+            try {
+              await this.#finalizeBind(fallback, fbPort, settleResolve, settleReject);
+            } catch (e) {
+              try {
+                fallback.close();
+              } catch {
+              }
+              activeDashboardPorts.delete(fbPort);
+              this.#ownedPort = null;
+              this.#token = null;
+              this.#server = null;
+              this.#url = null;
+              this.url = null;
+              this.#bootstrapUrl = null;
+              settleReject(e instanceof Error ? e : new Error(String(e)));
+            }
           });
         });
       });
@@ -2377,21 +2835,179 @@ var MemoryDashboard = class {
       this.#starting = null;
     }
   }
+  /**
+   * Shared post-bind ownership routine (gate R5-F1): register the bound port, then
+   * DECIDE ownership before materializing any token (M2 ordering). Either adopts the
+   * race winner's live auth dashboard (reading its token loudly, never writing) or
+   * keeps our port and only then generates+persists ours.
+   */
+  async #finalizeBind(server, actualPort, ok, fail) {
+    this.#server = server;
+    this.#url = `http://127.0.0.1:${actualPort}`;
+    this.url = this.#url;
+    writePortFile(this.#portDir, actualPort);
+    activeDashboardPorts.add(actualPort);
+    this.#ownedPort = actualPort;
+    let after = null;
+    let afterProbe = { alive: false };
+    let gen = null;
+    try {
+      after = this.#readPortFileFn(this.#portDir);
+      afterProbe = after !== null && after !== actualPort ? await isAlive(after) : { alive: false };
+      gen = after !== null && after !== actualPort ? await peerGeneration(after) : null;
+    } catch {
+    }
+    if (after !== null && after !== actualPort && afterProbe.alive && gen === "auth") {
+      try {
+        server.close();
+      } catch {
+      }
+      activeDashboardPorts.delete(actualPort);
+      this.#ownedPort = null;
+      this.#server = null;
+      this.#url = `http://127.0.0.1:${after}`;
+      this.url = this.#url;
+      writePortFile(this.#portDir, after);
+      const stillAlive = await isAlive(after);
+      if (!stillAlive.alive) {
+        this.#url = null;
+        this.url = null;
+        this.#bootstrapUrl = null;
+        fail(new Error(`adopted dashboard on port ${after} died before handshake completed`));
+        return;
+      }
+      const found = await this.#adoptTokenFn(this.#portDir);
+      this.#token = found.token;
+      this.#bootstrapUrl = `${this.#url}/?t=${this.#token}`;
+      ok(this.#bootstrapUrl);
+      return;
+    }
+    this.#token = await this.#loadOrCreateToken({ reuseOnly: false });
+    this.#bootstrapUrl = `${this.#url}/?t=${this.#token}`;
+    ok(this.#bootstrapUrl);
+  }
+  async #loadOrCreateToken(opts) {
+    const dir = this.#portDir;
+    if (opts.reuseOnly) {
+      const found = await readTokenFileWithRetry(dir);
+      return found.token;
+    }
+    const existing = this.#freshTokenFn(dir);
+    if (existing) return existing.token;
+    const token = generateToken();
+    writeTokenFile(dir, token);
+    return token;
+  }
+  #hostAllowed(req) {
+    const host = req.headers.host ?? "";
+    const port = this.#url ? new URL(this.#url).port : null;
+    if (!port || !host) return false;
+    const allowed = /* @__PURE__ */ new Set([`127.0.0.1:${port}`, `localhost:${port}`, `[::1]:${port}`]);
+    return allowed.has(host);
+  }
+  #originAllowed(req) {
+    const origin = req.headers.origin;
+    if (!origin) return true;
+    const port = this.#url ? new URL(this.#url).port : null;
+    if (!port) return false;
+    const allowed = /* @__PURE__ */ new Set([`http://127.0.0.1:${port}`, `http://localhost:${port}`, `http://[::1]:${port}`]);
+    return allowed.has(origin);
+  }
+  /**
+   * Security middleware (ADR-006 Fase 1). Order: Host allowlist -> Origin (when present) -> auth.
+   * Open route: only /healthz. Auth: X-Memory-Token header everywhere; ?t= exclusively on GET /
+   * (Jupyter-style bootstrap). Adds Cache-Control: no-store to authenticated responses.
+   * Returns true when request was fully handled (rejected or open route).
+   */
+  #securityGate(req, res) {
+    const url = req.url ?? "/";
+    const method = req.method ?? "GET";
+    if (!this.#hostAllowed(req)) {
+      this.#json(res, 403, { ok: false, error: "forbidden" });
+      return true;
+    }
+    if (url === "/healthz" && method === "GET") {
+      this.#json(res, 200, { ok: true });
+      return true;
+    }
+    if (!this.#originAllowed(req)) {
+      this.#json(res, 403, { ok: false, error: "forbidden" });
+      return true;
+    }
+    let pathname = "/";
+    try {
+      pathname = new URL(url, "http://localhost").pathname;
+    } catch {
+    }
+    const browserNavigation = pathname === "/" && method === "GET";
+    const providedHeader = req.headers["x-memory-token"];
+    let provided = Array.isArray(providedHeader) ? providedHeader[0] : providedHeader;
+    if (provided === "") provided = void 0;
+    try {
+      const parsed = new URL(url, "http://localhost");
+      const t = parsed.searchParams.get("t");
+      if (t && !provided && parsed.pathname === "/" && method === "GET") {
+        provided = t;
+      }
+    } catch {
+    }
+    const expected = this.#token;
+    if (!expected || !tokenMatches(provided, expected)) {
+      if (provided !== void 0) {
+        this.#failures.recordFailure();
+      }
+      if (this.#failures.locked()) {
+        if (browserNavigation) {
+          res.setHeader("Cache-Control", "no-store");
+          res.writeHead(429, { "Content-Type": "text/html; charset=utf-8" });
+          res.end(lockedHtml());
+          return true;
+        }
+        this.#json(res, 429, { ok: false, error: "locked" });
+        return true;
+      }
+      if (browserNavigation) {
+        res.setHeader("Cache-Control", "no-store");
+        res.writeHead(401, { "Content-Type": "text/html; charset=utf-8" });
+        res.end(lockedHtml());
+        return true;
+      }
+      this.#json(res, 401, { ok: false, error: "unauthorized" });
+      return true;
+    }
+    this.#failures.reset();
+    res.setHeader("Cache-Control", "no-store");
+    return false;
+  }
+  #json(res, status, body) {
+    res.writeHead(status, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(body));
+  }
   async #handleRequest(req, res) {
     const url = req.url ?? "/";
     const method = req.method ?? "GET";
-    if (url === "/" && method === "GET") {
+    let path = url;
+    try {
+      path = new URL(url, "http://localhost").pathname;
+    } catch {
+    }
+    if (this.#securityGate(req, res)) return;
+    if (path === "/healthz" && method === "GET") {
+      this.#json(res, 200, { ok: true });
+      return;
+    }
+    if (path === "/" && method === "GET") {
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       res.end(spaHtml());
       return;
     }
-    if (url === "/api/data" && method === "GET") {
+    if (path === "/api/data" && method === "GET") {
       const snap = await this.snapshot();
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(snap));
       return;
     }
-    if (url.startsWith("/api/search") && method === "GET") {
+    if (path.startsWith("/api/search") && method === "GET") {
       const parsed = new URL(url, "http://localhost");
       const q = parsed.searchParams.get("q") ?? "";
       const results = await this.search(q);
@@ -2399,35 +3015,35 @@ var MemoryDashboard = class {
       res.end(JSON.stringify(results));
       return;
     }
-    if (url === "/api/setup" && method === "POST") {
+    if (path === "/api/setup" && method === "POST") {
       const result = await this.provision();
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(result));
       return;
     }
-    if (url === "/api/config" && method === "GET") {
+    if (path === "/api/config" && method === "GET") {
       const config = this.getServerConfig();
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(config));
       return;
     }
-    if (url === "/api/config" && method === "POST") {
+    if (path === "/api/config" && method === "POST") {
       this.#readJsonBody(req, res, async (parsed) => this.saveServerConfig(parsed.url));
       return;
     }
-    if (url === "/api/config" && method === "DELETE") {
+    if (path === "/api/config" && method === "DELETE") {
       const result = await this.saveServerConfig(void 0);
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(result));
       return;
     }
-    if (url === "/api/onboarding/status" && method === "GET") {
+    if (path === "/api/onboarding/status" && method === "GET") {
       const status = await this.onboardingStatus();
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(status));
       return;
     }
-    if (url === "/api/onboarding/setup" && method === "POST") {
+    if (path === "/api/onboarding/setup" && method === "POST") {
       this.#readJsonBody(req, res, async (parsed) => this.onboardingSetup(parsed), {
         timeoutMs: 12e4
         // local mode: client may stream a large body slowly — handler runs after
@@ -2447,14 +3063,37 @@ var MemoryDashboard = class {
       return;
     }
     let body = "";
+    let bytes = 0;
+    let rejected = false;
     let timedOut = false;
+    const tooLarge = () => {
+      rejected = true;
+      res.writeHead(413, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "Payload too large" }));
+      req.destroy();
+    };
     const timer = setTimeout(() => {
       timedOut = true;
+      try {
+        if (!res.writableEnded && !res.headersSent) {
+          res.writeHead(408, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: false, error: "request timeout" }));
+        }
+      } catch {
+      }
       req.destroy();
     }, REQUEST_TIMEOUT_MS);
     req.on("data", (chunk) => {
-      if (timedOut) return;
+      if (timedOut || rejected) return;
+      bytes += chunk.length;
+      if (bytes > MAX_BODY) {
+        tooLarge();
+        return;
+      }
       body += chunk.toString();
+    });
+    req.on("close", () => {
+      clearTimeout(timer);
     });
     req.on("error", () => {
       clearTimeout(timer);
@@ -2474,6 +3113,11 @@ var MemoryDashboard = class {
   }
 };
 
+// src/index.ts
+init_config();
+init_contracts();
+init_provision();
+
 // src/onboarding-text.ts
 function renderSetupMenu(status) {
   const lines = [];
@@ -2487,11 +3131,24 @@ function renderSetupMenu(status) {
     }
     if (status.onboarded) lines.push("Setup previously completed (onboarded).");
   } else if (status.urlSource === "none") {
-    lines.push("State: No server configured \u2014 plugin tools are inactive until you set one up.");
+    if (status.source === "registry-dead") {
+      lines.push("State: registry unreachable (a previous daemon registration is dead) \u2014 plugin tools are inactive.");
+      lines.push('Fix: memory_setup("local") to install fresh, or memory_setup("remote", url) to point elsewhere.');
+    } else {
+      lines.push("State: No server configured \u2014 plugin tools are inactive until you set one up.");
+    }
   } else {
     lines.push(`State: configured but UNREACHABLE (${status.configuredUrl}).`);
     if (status.actions.length > 0) {
-      lines.push(`Repair options: ${status.actions.join(", ")}.`);
+      const commands = {
+        retest: "memory_setup() \u2014 re-check status",
+        "replace-url": 'memory_setup("remote", "<url>") \u2014 save a new URL',
+        "forget-url": 'memory_setup("forget") \u2014 clear the saved URL'
+      };
+      lines.push("Repair options:");
+      for (const action of status.actions) {
+        lines.push(`  ${commands[action] ?? action}`);
+      }
     }
   }
   lines.push("");
@@ -2499,9 +3156,22 @@ function renderSetupMenu(status) {
   lines.push("");
   lines.push("Choose a mode and call again:");
   lines.push('  memory_setup("local")              \u2014 download JAR, start daemon locally, health-check');
-  lines.push('  memory_setup("remote", url)        \u2014 point to an already-running server, health-check');
+  lines.push('  memory_setup("remote", url)        \u2014 point to an already-running server, e.g. memory_setup("remote", "http://127.0.0.1:54116"), health-check');
   lines.push('  memory_setup("skip")               \u2014 skip onboarding for now');
+  lines.push('  memory_setup("forget")             \u2014 clear the saved URL');
+  if (!status.hasDaemon) {
+    lines.push("");
+    lines.push("Tip: memory_dashboard opens the visual setup card (same options) even with no server configured.");
+  }
   return lines.join("\n");
+}
+function buildRemoteUrlRequiredMessage(status) {
+  return [
+    'memory_setup("remote") needs a url \u2014 nothing was saved.',
+    'Example: memory_setup("remote", "http://127.0.0.1:54116")',
+    "",
+    renderSetupMenu(status)
+  ].join("\n");
 }
 function renderSetupResult(result) {
   if (!result.ok) {
@@ -2511,12 +3181,11 @@ function renderSetupResult(result) {
   if (result.daemonUrl) parts.push(`server=${result.daemonUrl}`);
   if (result.verified === true) parts.push("health check OK");
   else if (result.verified === false) parts.push(`WARNING: /health did NOT confirm \u2014 ${result.error ?? "unverified"}`);
+  if (result.warning) parts.push(`WARNING: ${result.warning}`);
+  if (result.mode === "forget") parts.push("saved URL cleared; tools will fall back to discovery");
   if (result.mode === "skip") parts.push("no server touched; call memory_setup with no args anytime to configure");
   return `memory-setup ok: ${parts.join("; ")}`;
 }
-
-// src/index.ts
-init_provision();
 
 // src/serverGate.ts
 init_daemon();
@@ -2648,6 +3317,9 @@ When server-side ingestion is off but client-side ingestion is on, the capabilit
 
 // src/index.ts
 import { z } from "zod";
+import { join as join7 } from "node:path";
+import { homedir as homedir5 } from "node:os";
+var PORT_DIR = join7(homedir5(), ".opencode-memory");
 var recallCache = /* @__PURE__ */ new Map();
 var turnCount = /* @__PURE__ */ new Map();
 var MAX_SESSION_CACHE = 500;
@@ -2739,10 +3411,14 @@ async function handleGraphIngest(root, refresh, workdir, projectId) {
 var OpenCodeMemory = async (ctx, options) => {
   const opts = options ?? {};
   const workdir = ctx.worktree ?? ctx.directory ?? process.cwd();
-  const projectId = tryResolveProjectId(workdir);
+  const resolveProjectPerCall = () => tryResolveProjectId(workdir);
+  const unavailable = () => JSON.stringify({ ok: false, code: MEMORY_UNAVAILABLE_CODE, message: MEMORY_UNAVAILABLE_MESSAGE });
   return {
     "experimental.chat.system.transform": async (_input, output) => {
       try {
+        if (projectIdStrength(workdir) === "none") {
+          output.system.push(MEMORY_FRAGILE_HINT);
+        }
         const daemon = await (async () => {
           const now = Date.now();
           if (daemonCache && now - daemonCacheAt < DAEMON_CACHE_TTL_MS) return daemonCache;
@@ -2900,13 +3576,23 @@ var OpenCodeMemory = async (ctx, options) => {
         description: "Check memory daemon status, features, and resolved project_id",
         args: {},
         execute: async () => {
-          const pid = tryResolveProjectId(workdir);
-          const fallbackDaemonNull = JSON.stringify({ ok: true, daemon: null, projectId: pid });
+          const pid = resolveProjectPerCall();
+          const strength = projectIdStrength(workdir);
+          const fallbackDaemonNull = JSON.stringify({ ok: true, daemon: null, projectId: pid, project_id: pid, strength });
           return withDaemon(async (url, _signal) => {
             void _signal;
             const features = daemonCache?.features ?? null;
-            return JSON.stringify({ ok: true, daemon: { url, features }, projectId: pid });
+            return JSON.stringify({ ok: true, daemon: { url, features }, projectId: pid, project_id: pid, strength });
           }, fallbackDaemonNull);
+        }
+      }),
+      memory_set_project: tool({
+        description: "Set project ID for this session (writes .memory/project.json). Use when no git remote.",
+        args: { project_id: z.string().describe("Project ID (ex: github.com/acme/app)") },
+        execute: async (args) => {
+          const res = writeDeclaredProjectId(workdir, args.project_id);
+          if (!res.ok) return JSON.stringify({ ok: false, error: res.error });
+          return JSON.stringify({ ok: true, project_id: tryResolveProjectId(workdir), path: res.path });
         }
       }),
       memory_search: tool({
@@ -2915,9 +3601,10 @@ var OpenCodeMemory = async (ctx, options) => {
         execute: async (args) => {
           return withDaemon(async (url) => {
             const client = getClient(url);
+            const pid = resolveProjectPerCall();
             const resp = await client.search(args.query, {
               topK: args.topK ?? 5,
-              metadata: projectId ? { project_id: projectId } : void 0
+              metadata: pid ? { project_id: pid } : void 0
             });
             return JSON.stringify(resp);
           }, JSON.stringify({ results: [], count: 0 }));
@@ -2941,11 +3628,15 @@ var OpenCodeMemory = async (ctx, options) => {
           metadata: z.record(z.string(), z.string()).optional()
         },
         execute: async (args) => {
+          const pid = resolveProjectPerCall();
+          if (!pid) return unavailable();
+          const { project_id: _ignored, ...safeMeta } = args.metadata ?? {};
+          void _ignored;
           return withDaemon(async (url) => {
             const client = getClient(url);
             const doc = await client.save(args.content, {
-              ...args.metadata,
-              ...projectId ? { project_id: projectId } : {}
+              ...safeMeta,
+              project_id: pid
             });
             return JSON.stringify({ ok: true, id: doc.id });
           }, JSON.stringify({ ok: false, error: "Daemon not available" }));
@@ -2959,6 +3650,8 @@ var OpenCodeMemory = async (ctx, options) => {
           body: z.string().describe("Body in English (## What, ## When to use, ## Do, ## Don't)")
         },
         execute: async (args) => {
+          const pid = resolveProjectPerCall();
+          if (!pid) return unavailable();
           const validation = validateSkill(args);
           if (!validation.valid) {
             return JSON.stringify({ ok: false, errors: validation.errors });
@@ -2967,7 +3660,7 @@ var OpenCodeMemory = async (ctx, options) => {
             const client = getClient(url);
             const doc = buildSkillDocument(args, {
               source: "curation",
-              ...projectId ? { project_id: projectId } : {}
+              project_id: pid
             });
             const flatMeta = {
               type: doc.metadata.type,
@@ -2992,7 +3685,7 @@ var OpenCodeMemory = async (ctx, options) => {
           return withDaemon(async (url) => {
             const client = getClient(url);
             const resp = await client.list({
-              metadata: projectId ? { project_id: projectId } : void 0
+              metadata: resolveProjectPerCall() ? { project_id: resolveProjectPerCall() } : void 0
             });
             const skills = resp.data.filter(
               (d) => d.metadata?.type === "skill" || d.metadata?.type === "skill_candidate"
@@ -3017,7 +3710,7 @@ var OpenCodeMemory = async (ctx, options) => {
           return withDaemon(async (url) => {
             const gc = getGraphClient(url);
             const root = args.root ?? workdir;
-            const st = await gc.status(root, projectId ?? void 0);
+            const st = await gc.status(root, resolveProjectPerCall() ?? void 0);
             return JSON.stringify({
               ok: true,
               project_id: st.project_id,
@@ -3038,7 +3731,10 @@ var OpenCodeMemory = async (ctx, options) => {
           root: z.string().optional().describe("Project root directory"),
           refresh: z.boolean().optional().describe("Force re-index from scratch")
         },
-        execute: async (args) => handleGraphIngest(args.root, args.refresh, workdir, projectId)
+        execute: async (args) => {
+          if (!resolveProjectPerCall()) return unavailable();
+          return handleGraphIngest(args.root, args.refresh, workdir, resolveProjectPerCall());
+        }
       }),
       graph_reindex: tool({
         description: "Alias to graph_ingest (compat with TOOLS.md) \u2014 re-index the project graph.",
@@ -3046,7 +3742,10 @@ var OpenCodeMemory = async (ctx, options) => {
           root: z.string().optional().describe("Project root directory"),
           refresh: z.boolean().optional().describe("Force re-index from scratch")
         },
-        execute: async (args) => handleGraphIngest(args.root, args.refresh, workdir, projectId)
+        execute: async (args) => {
+          if (!resolveProjectPerCall()) return unavailable();
+          return handleGraphIngest(args.root, args.refresh, workdir, resolveProjectPerCall());
+        }
       }),
       graph_symbols: tool({
         description: "List graph symbols (hubs by PageRank, or search by name query).",
@@ -3062,7 +3761,7 @@ var OpenCodeMemory = async (ctx, options) => {
             const result = await gc.symbols(root, {
               query: args.query,
               limit: args.limit,
-              expectedProjectId: projectId ?? void 0
+              expectedProjectId: resolveProjectPerCall() ?? void 0
             });
             return JSON.stringify({
               ok: true,
@@ -3095,7 +3794,7 @@ var OpenCodeMemory = async (ctx, options) => {
                   query: args.query,
                   topK: args.topK,
                   hops: args.hops,
-                  expectedProjectId: projectId ?? void 0
+                  expectedProjectId: resolveProjectPerCall() ?? void 0
                 });
                 return JSON.stringify({
                   ok: true,
@@ -3130,7 +3829,7 @@ var OpenCodeMemory = async (ctx, options) => {
                 const result = await gc.callers(root, {
                   id: args.id,
                   limit: args.limit,
-                  expectedProjectId: projectId ?? void 0
+                  expectedProjectId: resolveProjectPerCall() ?? void 0
                 });
                 return JSON.stringify({
                   ok: true,
@@ -3165,7 +3864,7 @@ var OpenCodeMemory = async (ctx, options) => {
                 const result = await gc.references(root, {
                   id: args.id,
                   limit: args.limit,
-                  expectedProjectId: projectId ?? void 0
+                  expectedProjectId: resolveProjectPerCall() ?? void 0
                 });
                 return JSON.stringify({
                   ok: true,
@@ -3191,11 +3890,12 @@ var OpenCodeMemory = async (ctx, options) => {
           refresh: z.boolean().optional().describe("Force re-index")
         },
         execute: async (args) => {
+          if (args.refresh && !resolveProjectPerCall()) return unavailable();
           return withDaemon(async (url) => {
             const gc = getGraphClient(url);
             const root = args.root ?? workdir;
             const result = await gc.ensureReady(root, {
-              expectedProjectId: projectId ?? void 0,
+              expectedProjectId: resolveProjectPerCall() ?? void 0,
               refresh: args.refresh,
               onProgress: (state, nodes) => {
                 void state;
@@ -3207,7 +3907,7 @@ var OpenCodeMemory = async (ctx, options) => {
               try {
                 const searchResult = await gc.search(root, {
                   query: args.query,
-                  expectedProjectId: projectId ?? void 0
+                  expectedProjectId: resolveProjectPerCall() ?? void 0
                 });
                 contextBundle = {
                   seed: searchResult.seed.map(fmtNode),
@@ -3245,6 +3945,7 @@ var OpenCodeMemory = async (ctx, options) => {
           source: z.string().optional().describe("Tag source label")
         },
         execute: async (args) => {
+          if (!resolveProjectPerCall()) return unavailable();
           return withDaemon(async (url) => {
             const gc = getGraphClient(url);
             const root = args.root ?? workdir;
@@ -3265,7 +3966,7 @@ var OpenCodeMemory = async (ctx, options) => {
                 id: args.id,
                 terms: [tagPhrase],
                 source: args.source ?? "agent",
-                expectedProjectId: projectId ?? void 0
+                expectedProjectId: resolveProjectPerCall() ?? void 0
               });
               return JSON.stringify({
                 ok: true,
@@ -3283,7 +3984,7 @@ var OpenCodeMemory = async (ctx, options) => {
                 query: args.query,
                 expectedName: args.expectedName,
                 source: args.source,
-                expectedProjectId: projectId ?? void 0
+                expectedProjectId: resolveProjectPerCall() ?? void 0
               });
               if (result.error) {
                 return JSON.stringify({ ok: false, error: result.reason });
@@ -3321,10 +4022,60 @@ var OpenCodeMemory = async (ctx, options) => {
           }
         }
       }),
+      memory_doctor: tool({
+        description: "Diagnose the memory plugin end-to-end: config, daemon reachability, Java, server JAR, dashboard liveness/auth and graph state. Read-only, no args.",
+        args: {},
+        execute: async () => {
+          try {
+            let discoveryPromise = null;
+            const resolveOnce = () => {
+              discoveryPromise ??= resolveDaemon();
+              return discoveryPromise;
+            };
+            const withTimeout = (p, ms) => Promise.race([p, new Promise((r) => setTimeout(() => r(null), ms).unref?.())]);
+            const report = await runDoctor({
+              resolveDaemon: resolveOnce,
+              health: (url) => health(url, 1500),
+              readConfig: () => readConfig(CONFIG_DIR),
+              envKey: ENV_KEY,
+              envValue: process.env[ENV_KEY],
+              validateDaemonUrl: (input) => validateDaemonUrl(input),
+              serverDir: () => serverDir(),
+              // gate Fase-3 #1: existence derives from the ARTIFACT, not the directory —
+              // failed provisioning leaves the dir with zero JARs
+              jarExists: () => installedJarVersion(serverDir()) !== null,
+              resolveJava: () => resolveJava({ serverDir: serverDir() }),
+              latestVersion: async () => {
+                const release = await withTimeout(fetchLatestServerRelease(), 4e3);
+                return release ? release.version.join(".") : null;
+              },
+              installedVersion: () => installedJarVersion(serverDir()),
+              readPortFile: (dir) => readPortFile(dir),
+              portDir: () => PORT_DIR,
+              isAlive: (port) => isAlive(port),
+              readTokenFile: (dir) => readTokenFile(dir),
+              graphStatus: async (root) => {
+                const d = await resolveOnce();
+                if (!d.info) throw new Error("daemon unavailable \u2014 graph status needs the server");
+                const gc = new GraphClient({ baseUrl: d.info.url, timeoutMs: 1e3 });
+                return await gc.status(root ?? workdir, resolveProjectPerCall() ?? void 0);
+              },
+              workdir
+            });
+            const output = renderDoctor(report) + "\n\n" + JSON.stringify(report.checks, null, 2);
+            return JSON.stringify({ title: `memory-doctor: ${report.status}`, output });
+          } catch (e) {
+            return JSON.stringify({
+              title: "memory-doctor: failed",
+              output: `doctor failed unexpectedly: ${e instanceof Error ? e.message : String(e)}`
+            });
+          }
+        }
+      }),
       memory_setup: tool({
-        description: 'Server setup wizard \u2014 no args returns the 3 options + current status; modes: "local" (download & start daemon), "remote" with url (point to running server), "skip".',
+        description: 'Server setup wizard \u2014 no args returns the options + current status; modes: "local" (download & start daemon), "remote" with url (point to running server), "skip", "forget" (clear saved URL).',
         args: {
-          mode: z.enum(["local", "remote", "skip"]).optional(),
+          mode: z.enum(ONBOARDING_MODES).optional(),
           url: z.string().optional()
         },
         execute: async (args) => {
@@ -3340,6 +4091,13 @@ var OpenCodeMemory = async (ctx, options) => {
               return JSON.stringify({
                 title: "memory-setup",
                 output: renderSetupMenu(status)
+              });
+            }
+            if (args.mode === "remote" && (args.url === void 0 || args.url === "")) {
+              const status = await dashboard.onboardingStatus();
+              return JSON.stringify({
+                title: "memory-setup",
+                output: buildRemoteUrlRequiredMessage(status)
               });
             }
             const result = await dashboard.onboardingSetup({
