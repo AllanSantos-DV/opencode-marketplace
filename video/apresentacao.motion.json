@@ -1,0 +1,118 @@
+{
+  "modo": "motion",
+  "tipo": "motion-apresentacao",
+  "titulo": "opencode-marketplace: plugins do OpenCode com um comando",
+  "slug": "apresentacao",
+  "estilo": "grade-tecnica",
+  "somenteVox": true,
+  "paleta": {
+    "fundo": "#f3f6fb",
+    "texto": "#0f1a2e",
+    "cor": "#be185d",
+    "cor2": "#1d4ed8"
+  },
+  "marca": {
+    "nome": "opencode-marketplace",
+    "cor": "#be185d",
+    "icone": "store"
+  },
+  "cenas": [
+    {
+      "cena": "abertura",
+      "kicker": "opencode-marketplace",
+      "titulo": "Plugins do OpenCode, com um comando.",
+      "subtitulo": "Registre a vitrine uma vez; instale e atualize os plugins pelo próprio OpenCode.",
+      "fala": "Este é o opencode-marketplace: uma vitrine de plugins para o OpenCode. Você registra uma vez e instala cada plugin com um comando.",
+      "fala_fonetica": "Este é o ôupen côud márket pleice: uma vitrine de plugins para o ôupen côud. Você registra uma vez e instala cada plugin com um comando."
+    },
+    {
+      "cena": "fluxo",
+      "titulo": "Três passos, uma vez cada",
+      "etapas": [
+        {
+          "titulo": "Registre",
+          "icone": "link",
+          "texto": "a vitrine no seu OpenCode"
+        },
+        {
+          "titulo": "Instale",
+          "icone": "download",
+          "texto": "o plugin pelo nome"
+        },
+        {
+          "titulo": "Atualize",
+          "icone": "refresh-cw",
+          "texto": "todos de uma vez"
+        }
+      ],
+      "destaque": 1,
+      "fala": "Você registra a vitrine no seu OpenCode, instala o plugin pelo nome e, quando sair versão nova, atualiza todos de uma vez.",
+      "fala_fonetica": "Você registra a vitrine no seu ôupen côud, instala o plugin pelo nome e, quando sair versão nova, atualiza todos de uma vez."
+    },
+    {
+      "cena": "tela",
+      "titulo": "Cada plugin com a sua página",
+      "html": "<div style='font-family:Segoe UI,sans-serif;height:100%;background:#ffffff;color:#0f1a2e;display:flex;flex-direction:column'><div style='padding:22px 34px;font-size:30px;font-weight:600;border-bottom:2px solid #d8deea'>opencode-marketplace</div><div style='flex:1;padding:34px;display:flex;gap:28px;align-items:flex-start'><div style='flex:1;background:#f3f6fb;border:2px solid #be185d;border-radius:16px;padding:26px 28px'><div style='font-size:22px;color:#1d4ed8;letter-spacing:2px;text-transform:uppercase'>produtividade</div><div style='font-size:40px;font-weight:700;margin-top:10px'>memory</div><div style='font-size:24px;color:#334155;margin-top:12px;line-height:1.4'>Memória entre sessões: o agente lembra do que já aprendeu, acha o código certo e guarda as lições.</div><div style='margin-top:20px;background:#e8eefb;border-radius:10px;padding:14px 18px;font-family:Consolas,monospace;font-size:22px;color:#1d4ed8'>opencode plugin install memory@opencode-marketplace</div></div></div></div>",
+      "foco": {
+        "x": 0.03,
+        "y": 0.12,
+        "w": 0.94,
+        "h": 0.7
+      },
+      "rotulo": "Instale pelo nome",
+      "moldura": "navegador",
+      "endereco": "allansantos-dv.github.io/opencode-marketplace",
+      "fala": "Na vitrine, cada plugin tem a sua página, com o que ele faz e o comando para instalar. O primeiro é o memory, que dá memória entre sessões ao seu agente."
+    },
+    {
+      "cena": "terminal",
+      "titulo": "Os três comandos",
+      "linhas": [
+        {
+          "cmd": "opencode plugin marketplace add AllanSantos-DV/opencode-marketplace"
+        },
+        {
+          "out": "vitrine registrada"
+        },
+        {
+          "cmd": "opencode plugin install memory@opencode-marketplace"
+        },
+        {
+          "out": "plugin instalado"
+        },
+        {
+          "cmd": "opencode plugin update --all"
+        }
+      ],
+      "fala": "São três comandos: um para registrar a vitrine, um para instalar o plugin e um para atualizar tudo. Nada para compilar: o plugin já chega pronto.",
+      "fala_fonetica": "São três comandos: um para registrar a vitrine, um para instalar o plugin e um para atualizar tudo. Nada para compilar: o plugin já chega pronto."
+    },
+    {
+      "cena": "numeros",
+      "titulo": "Simples de manter",
+      "numeros": [
+        {
+          "valor": 1,
+          "rotulo": "registro, uma vez só"
+        },
+        {
+          "valor": 3,
+          "rotulo": "comandos para tudo"
+        },
+        {
+          "valor": 0,
+          "rotulo": "passos de compilação"
+        }
+      ],
+      "fala": "Um registro, uma vez só. Três comandos para tudo. E nenhum passo de compilação na sua máquina."
+    },
+    {
+      "cena": "fechamento",
+      "titulo": "opencode-marketplace",
+      "subtitulo": "Plugins do OpenCode, com um comando.",
+      "cta": "AllanSantos-DV/opencode-marketplace",
+      "fala": "opencode-marketplace: plugins do OpenCode com um comando. Registre a vitrine e instale o primeiro.",
+      "fala_fonetica": "ôupen côud márket pleice: plugins do ôupen côud com um comando. Registre a vitrine e instale o primeiro."
+    }
+  ]
+}

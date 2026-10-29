@@ -1,0 +1,65 @@
+WEBVTT
+
+1
+00:00:00.450 --> 00:00:02.850
+Este é o opencode-marketplace: uma vitrine
+
+2
+00:00:02.850 --> 00:00:05.145
+de plugins para o OpenCode. Você registra
+
+3
+00:00:05.145 --> 00:00:07.908
+uma vez e instala cada plugin com um comando.
+
+4
+00:00:08.950 --> 00:00:11.228
+Você registra a vitrine no seu OpenCode,
+
+5
+00:00:11.228 --> 00:00:13.510
+instala o plugin pelo nome e, quando sair
+
+6
+00:00:13.510 --> 00:00:15.934
+versão nova, atualiza todos de uma vez.
+
+7
+00:00:16.950 --> 00:00:19.593
+Na vitrine, cada plugin tem a sua página, com o que
+
+8
+00:00:19.593 --> 00:00:22.087
+ele faz e o comando para instalar. O primeiro é o
+
+9
+00:00:22.087 --> 00:00:24.930
+memory, que dá memória entre sessões ao seu agente.
+
+10
+00:00:25.950 --> 00:00:28.521
+São três comandos: um para registrar a vitrine,
+
+11
+00:00:28.521 --> 00:00:30.938
+um para instalar o plugin e um para atualizar
+
+12
+00:00:30.938 --> 00:00:33.919
+tudo. Nada para compilar: o plugin já chega pronto.
+
+13
+00:00:34.950 --> 00:00:37.643
+Um registro, uma vez só. Três comandos para tudo.
+
+14
+00:00:37.643 --> 00:00:40.272
+E nenhum passo de compilação na sua máquina.
+
+15
+00:00:40.950 --> 00:00:43.767
+opencode-marketplace: plugins do OpenCode com um
+
+16
+00:00:43.767 --> 00:00:46.840
+comando. Registre a vitrine e instale o primeiro.
